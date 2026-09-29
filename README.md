@@ -10,4 +10,4 @@ cd Aminos
 .\install-skills.ps1
 ```
 
-Copies all skills to `%USERPROFILE%\.claude\skills` and `C:\Users\verta\Downloads\_certification\.claude\skills`, then restart Claude Code.
+Copies all skills to `%USERPROFILE%\.claude\skills`, `_certification\.claude\skills`, and `_certification\atelier\{.claude,.agents,.codex,.gemini}\skills` (Claude Code, Codex, Gemini and other agents), then restart your agent.

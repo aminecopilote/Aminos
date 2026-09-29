@@ -4,7 +4,12 @@ $ErrorActionPreference = 'Stop'
 $src = Join-Path $PSScriptRoot '.claude\skills'
 $targets = @(
   (Join-Path $env:USERPROFILE '.claude\skills'),
-  'C:\Users\verta\Downloads\_certification\.claude\skills'
+  'C:\Users\verta\Downloads\_certification\.claude\skills',
+  # atelier workspace: one folder per AI agent (Claude Code, Codex/Gemini/other agents)
+  'C:\Users\verta\Downloads\_certification\atelier\.claude\skills',
+  'C:\Users\verta\Downloads\_certification\atelier\.agents\skills',
+  'C:\Users\verta\Downloads\_certification\atelier\.codex\skills',
+  'C:\Users\verta\Downloads\_certification\atelier\.gemini\skills'
 )
 foreach ($t in $targets) {
   New-Item -ItemType Directory -Force -Path $t | Out-Null
