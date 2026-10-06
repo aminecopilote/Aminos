@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from . import checks, prompts
 from .glossary import Glossary
 from .llm import Chat
+from .tm import TranslationMemory
 
 MODES = ("fast", "normal", "hard")
 
@@ -97,6 +98,26 @@ def translate_chunk(chat: Chat, sources: list[str], source_lang: str, target_lan
 
 def translate_document(chat: Chat, paragraphs: list[str], source_lang: str, target_lang: str,
                        gloss: Glossary | None = None, mode: str = "normal", jurisdiction: str = "",
-                       max_chars: int = 1800) -> list[ChunkResult]:
-    return [translate_chunk(chat, c, source_lang, target_lang, gloss, mode, jurisdiction)
-            for c in chunk_paragraphs(paragraphs, max_chars)]
+                       max_chars: int = 1800, tm: TranslationMemory | None = None,
+                       reuse_threshold: float = 0.98) -> list[str]:
+    """Translate paragraphs; returns one translation per input paragraph.
+
+    With a translation memory, paragraphs matching >= reuse_threshold are reused without
+    calling the model; new translations are stored back in the memory.
+    """
+    out: list[str | None] = [None] * len(paragraphs)
+    todo: list[int] = []
+    for i, para in enumerate(paragraphs):
+        hit = tm.lookup(para, source_lang, target_lang, reuse_threshold, 1) if tm else []
+        if hit:
+            out[i] = hit[0].target
+        else:
+            todo.append(i)
+    for chunk in chunk_paragraphs([paragraphs[i] for i in todo], max_chars):
+        r = translate_chunk(chat, chunk, source_lang, target_lang, gloss, mode, jurisdiction)
+        for src, tgt in zip(chunk, r.translations):
+            idx = todo.pop(0)
+            out[idx] = tgt
+            if tm and not r.issues:
+                tm.add(src, tgt, source_lang, target_lang)
+    return [t or "" for t in out]

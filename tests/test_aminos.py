@@ -111,5 +111,42 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(r.issues)
 
 
+class TMAndExtractTests(unittest.TestCase):
+    def test_tm_exact_fuzzy_and_isolation(self):
+        from aminos.tm import TranslationMemory
+        tm = TranslationMemory()
+        tm.add("صدر الحكم بتاريخ 2024", "Jugement rendu en 2024", "ar", "fr")
+        self.assertEqual(tm.lookup("صدر الحكم بتاريخ 2024", "ar", "fr")[0].score, 1.0)
+        fuzzy = tm.lookup("صدر الحكم بتاريخ 2023", "ar", "fr", 0.8)
+        self.assertEqual(len(fuzzy), 1)
+        self.assertLess(fuzzy[0].score, 1.0)
+        self.assertEqual(tm.lookup("صدر الحكم بتاريخ 2024", "ar", "en"), [])
+
+    def test_document_reuses_tm_and_stores(self):
+        from aminos.pipeline import translate_document
+        from aminos.tm import TranslationMemory
+        tm = TranslationMemory()
+        tm.add("الحكم", "le jugement", "ar", "fr")
+        calls = []
+
+        def chat(messages, system):
+            calls.append(1)
+            return "le tribunal"
+        out = translate_document(chat, ["الحكم", "المحكمة"], "ar", "fr", mode="fast", tm=tm)
+        self.assertEqual(out, ["le jugement", "le tribunal"])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(tm), 2)
+
+    def test_extract_txt_and_scan_requires_ocr(self):
+        from aminos.extract import extract_paragraphs
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "a.txt").write_text("un\n\ndeux\ntrois", encoding="utf-8")
+            (Path(d) / "b.png").write_bytes(b"x")
+            self.assertEqual(extract_paragraphs(Path(d) / "a.txt"), ["un", "deux\ntrois"])
+            self.assertEqual(extract_paragraphs(Path(d) / "b.png", lambda b, m: "a\n\nb"), ["a", "b"])
+            with self.assertRaises(RuntimeError):
+                extract_paragraphs(Path(d) / "b.png")
+
+
 if __name__ == "__main__":
     unittest.main()

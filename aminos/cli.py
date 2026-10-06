@@ -9,15 +9,6 @@ from . import checks
 from .glossary import Glossary, import_path
 
 
-def _read_paragraphs(path: Path) -> list[str]:
-    if path.suffix.lower() == ".docx":
-        import docx
-        return [p.text for p in docx.Document(str(path)).paragraphs if p.text.strip()]
-    text = path.read_text(encoding="utf-8")
-    return [p.strip() for p in text.split("\n\n") if p.strip()] if "\n\n" in text else [
-        l.strip() for l in text.splitlines() if l.strip()]
-
-
 def _cmd_import(a) -> int:
     g = import_path(a.path, (a.src_col, a.tgt_col))
     g.save(a.out)
@@ -46,17 +37,31 @@ def _cmd_check(a) -> int:
 
 def _cmd_translate(a) -> int:
     from .docx_out import build_docx
+    from .extract import extract_paragraphs, ocr_claude, ocr_tesseract
     from .llm import anthropic_chat
     from .pipeline import translate_document
+    from .tm import TranslationMemory
     g = Glossary.load(a.glossary) if a.glossary else Glossary()
-    paragraphs = _read_paragraphs(Path(a.file))
-    results = translate_document(anthropic_chat(a.model), paragraphs, a.source, a.target, g, a.mode, a.jurisdiction)
-    out = [t for r in results for t in r.translations]
+    ocr = {"claude": ocr_claude, "tesseract": lambda: ocr_tesseract(), None: lambda: None}[a.ocr]()
+    paragraphs = extract_paragraphs(a.file, ocr)
+    tm = TranslationMemory(a.tm) if a.tm else None
+    out = translate_document(anthropic_chat(a.model), paragraphs, a.source, a.target, g, a.mode,
+                             a.jurisdiction, tm=tm)
     build_docx(out, a.target, a.out)
-    for r in results:
-        for i in r.issues:
-            print("ATTENTION :", i, file=sys.stderr)
     print(f"{len(out)} paragraphes écrits dans {a.out}")
+    return 0
+
+
+def _cmd_tm(a) -> int:
+    from .tm import TranslationMemory
+    tm = TranslationMemory(a.db)
+    if a.action == "import":
+        print(f"{tm.import_tsv(a.file, a.source, a.target)} segments importés ({len(tm)} au total)")
+    elif a.action == "export":
+        tm.export_tsv(a.file)
+    else:
+        for m in tm.lookup(a.file, a.source, a.target):
+            print(f"{m.score:.0%}\t{m.source}\t{m.target}")
     return 0
 
 
@@ -81,7 +86,15 @@ def main(argv=None) -> int:
     tp.add_argument("-s", "--source", required=True); tp.add_argument("-t", "--target", required=True)
     tp.add_argument("-g", "--glossary"); tp.add_argument("-m", "--mode", choices=["fast", "normal", "hard"], default="normal")
     tp.add_argument("--model", default="claude-sonnet-5-5"); tp.add_argument("--jurisdiction", default="")
+    tp.add_argument("--ocr", choices=["claude", "tesseract"], default=None, help="OCR pour scans/images")
+    tp.add_argument("--tm", help="base SQLite de mémoire de traduction")
     tp.set_defaults(fn=_cmd_translate)
+
+    mp = sub.add_parser("tm", help="mémoire de traduction : import | export | lookup")
+    mp.add_argument("action", choices=["import", "export", "lookup"]); mp.add_argument("db")
+    mp.add_argument("file", help="fichier TSV (ou texte à chercher pour lookup)")
+    mp.add_argument("-s", "--source", default=""); mp.add_argument("-t", "--target", default="")
+    mp.set_defaults(fn=_cmd_tm)
 
     a = ap.parse_args(argv)
     return a.fn(a)

@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .normalize import normalize, tokens
 
-SUPPORTED_SUFFIXES = {".csv", ".tsv", ".txt", ".json", ".xlsx", ".docx"}
+SUPPORTED_SUFFIXES = {".csv", ".tsv", ".txt", ".json", ".xlsx", ".docx", ".pdf"}
 _TXT_SPLIT = re.compile(r"\s*(?:\t|=|:|;|\||→|->|–|—| - )\s*")
 
 
@@ -155,6 +155,14 @@ def import_file(path: str | Path, cols: tuple[int, int] = (0, 1)) -> list[Term]:
         d = docx.Document(str(p))
         return [t for tbl in d.tables
                 for t in _rows_to_terms(([c.text for c in row.cells] for row in tbl.rows), origin, cols)]
+    if suffix == ".pdf":
+        try:
+            import pdfplumber
+        except ImportError as e:
+            raise RuntimeError("pip install pdfplumber to import .pdf glossaries") from e
+        with pdfplumber.open(str(p)) as pdf:
+            return [t for page in pdf.pages for tbl in page.extract_tables()
+                    for t in _rows_to_terms(tbl, origin, cols)]
     raise ValueError(f"Unsupported glossary format: {p.suffix}")
 
 

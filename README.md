@@ -10,6 +10,9 @@ Atelier de traduction juridique (AR / FR / EN) : moteur de terminologie, contrô
 - **Contrôles déterministes** : nombres, dates et numéros d'articles manquants ou ajoutés, nombre de segments.
 - **Modes** : `fast` (brouillon), `normal` (contrôles puis correction si problème), `hard` (rétro-traduction + comparaison + correction).
 - **Sortie .docx** : `**gras**` converti en vrai gras, RTL pour l'arabe, Calibri 10, interligne 1,0, marges 1,27 cm.
+- **Extraction PDF / scans / images** : texte natif des PDF (pdfplumber), OCR automatique des pages sans couche texte et des images `.png/.jpg/.webp`, via `--ocr claude` (vision, transcrit aussi cachets et sceaux) ou `--ocr tesseract` (hors ligne, `ara+fra+eng`). Les glossaires `.pdf` à tableaux sont aussi importables.
+- **Mémoire de traduction** (SQLite, `--tm tm.sqlite`) : les paragraphes déjà traduits (≥ 98 % de similitude) sont réutilisés sans appel au modèle ; les traductions sans anomalie sont enregistrées. `aminos tm import|export|lookup` pour échanger en TSV et interroger les correspondances approchées.
+- **Interface web** (`streamlit run app.py`) : envoi du document et des glossaires, choix des langues/mode/OCR, vue source/traduction côte à côte, alertes de contrôle, téléchargement du .docx.
 - Règles de style du traducteur (noms en gras, **NOM** en majuscules, cachets, logos, aucun commentaire) dans `aminos/prompts.py`.
 
 ## Utilisation
@@ -27,6 +30,9 @@ aminos glossary-find glossary.json source.txt
 # 3. Traduire
 aminos translate acte.docx -s arabe -t français -g glossary.json -m normal --jurisdiction "droit français" -o acte_fr.docx
 
+# 3b. Scan ou PDF image, avec mémoire de traduction
+aminos translate scan.pdf -s arabe -t français --ocr claude --tm tm.sqlite -g glossary.json -o scan_fr.docx
+
 # 4. Contrôler une traduction existante
 aminos check source.txt traduction.txt -g glossary.json
 ```
@@ -35,4 +41,4 @@ Tests : `python -m unittest discover -s tests`.
 
 ## Limites
 
-Le dossier Windows n'est pas lisible depuis la session cloud : les glossaires doivent être importés en local ou copiés dans le dépôt. Les PDF et DOC (non `.docx`) ne sont pas encore importables ; la mise en page est reproduite au niveau du paragraphe.
+Le dossier Windows n'est pas lisible depuis la session cloud : les glossaires doivent être importés en local ou copiés dans le dépôt. Les `.doc` (non `.docx`) ne sont pas lus. Extraction PDF, OCR et interface web : non testés sur de vrais fichiers ici (tests unitaires seulement). La mise en page est reproduite au niveau du paragraphe.
