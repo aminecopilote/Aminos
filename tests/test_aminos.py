@@ -137,6 +137,13 @@ class TMAndExtractTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
         self.assertEqual(len(tm), 2)
 
+    def test_empty_tm_is_still_populated(self):
+        from aminos.pipeline import translate_document
+        from aminos.tm import TranslationMemory
+        tm = TranslationMemory()
+        translate_document(lambda m, s: "x", ["a b c"], "ar", "fr", mode="fast", tm=tm)
+        self.assertEqual(len(tm), 1)
+
     def test_extract_txt_and_scan_requires_ocr(self):
         from aminos.extract import extract_paragraphs
         with tempfile.TemporaryDirectory() as d:

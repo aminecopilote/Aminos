@@ -56,7 +56,9 @@ def _pdf(path: Path, ocr: OCR | None) -> list[str]:
     with pdfplumber.open(str(path)) as pdf:
         for page in pdf.pages:
             text = (page.extract_text() or "").strip()
-            if len(text) < 20:  # scanned page: no usable text layer
+            if not text and not page.images:
+                continue  # blank page
+            if len(text) < 20 and page.images:  # scanned page: no usable text layer
                 if ocr is None:
                     raise RuntimeError(f"{path.name} p.{page.page_number}: page scannée, activez l'OCR")
                 buf = io.BytesIO()

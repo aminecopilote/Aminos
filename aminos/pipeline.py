@@ -108,7 +108,7 @@ def translate_document(chat: Chat, paragraphs: list[str], source_lang: str, targ
     out: list[str | None] = [None] * len(paragraphs)
     todo: list[int] = []
     for i, para in enumerate(paragraphs):
-        hit = tm.lookup(para, source_lang, target_lang, reuse_threshold, 1) if tm else []
+        hit = tm.lookup(para, source_lang, target_lang, reuse_threshold, 1) if tm is not None else []
         if hit:
             out[i] = hit[0].target
         else:
@@ -118,6 +118,6 @@ def translate_document(chat: Chat, paragraphs: list[str], source_lang: str, targ
         for src, tgt in zip(chunk, r.translations):
             idx = todo.pop(0)
             out[idx] = tgt
-            if tm and not r.issues:
+            if tm is not None and not r.issues:
                 tm.add(src, tgt, source_lang, target_lang)
     return [t or "" for t in out]
