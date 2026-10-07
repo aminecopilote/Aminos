@@ -7,14 +7,7 @@ from pathlib import Path
 
 from . import checks
 from .glossary import Glossary, import_path
-
-
-def _open_memory(path, backend="sqlite", embedding="hash"):
-    if backend == "chroma":
-        from .chroma_memory import SemanticMemory
-        return SemanticMemory(path, embedding)
-    from .tm import TranslationMemory
-    return TranslationMemory(path)
+from .memory import open_memory
 
 
 def _cmd_import(a) -> int:
@@ -52,7 +45,7 @@ def _cmd_translate(a) -> int:
     g = Glossary.load(a.glossary) if a.glossary else Glossary()
     ocr = {"claude": ocr_claude, "tesseract": lambda: ocr_tesseract(), None: lambda: None}[a.ocr]()
     paragraphs = extract_paragraphs(a.file, ocr)
-    tm = _open_memory(a.tm, a.tm_backend, a.embedding) if a.tm else None
+    tm = open_memory(a.tm, a.tm_backend, a.embedding) if a.tm else None
     out = translate_document(build_chat(a.provider, a.model, a.allow_free_tier), paragraphs, a.source, a.target, g, a.mode,
                              a.jurisdiction, tm=tm)
     build_docx(out, a.target, a.out)
@@ -98,7 +91,7 @@ def _cmd_providers(a) -> int:
 
 
 def _cmd_tm(a) -> int:
-    tm = _open_memory(a.db, a.backend, a.embedding)
+    tm = open_memory(a.db, a.backend, a.embedding)
     if a.action == "import":
         print(f"{tm.import_tsv(a.file, a.source, a.target)} segments importés ({len(tm)} au total)")
     elif a.action == "export":
