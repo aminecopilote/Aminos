@@ -11,7 +11,7 @@ from aminos.extract import extract_paragraphs, ocr_claude, ocr_tesseract
 from aminos.glossary import Glossary, import_file
 from aminos.providers import PROVIDERS, build_chat
 from aminos.pipeline import translate_document
-from aminos.tm import TranslationMemory
+from aminos.cli import _open_memory
 
 st.set_page_config(page_title="Aminos", layout="wide")
 st.title("Aminos — traduction juridique")
@@ -25,7 +25,8 @@ with st.sidebar:
     mode = st.radio("Mode", ["fast", "normal", "hard"], index=1)
     ocr_kind = st.selectbox("OCR (scans, images)", ["aucun", "claude", "tesseract"])
     juris = st.text_input("Juridiction", "")
-    tm_path = st.text_input("Base de mémoire de traduction", "tm.sqlite")
+    tm_backend = st.selectbox("Mémoire de traduction", ["sqlite", "chroma"])
+    tm_path = st.text_input("Fichier (sqlite) ou dossier (chroma)", "tm.sqlite" if tm_backend == "sqlite" else "tm_chroma")
     gloss_files = st.file_uploader("Glossaires", accept_multiple_files=True,
                                    type=["csv", "tsv", "txt", "json", "xlsx", "docx", "pdf"])
 
@@ -47,7 +48,7 @@ if upload and st.button("Traduire", type="primary"):
             paragraphs = extract_paragraphs(fp, ocr)
         with st.spinner("Traduction…"):
             out = translate_document(build_chat(",".join(provider) or "anthropic", None, allow_free), paragraphs, src, tgt, gloss, mode, juris,
-                                     tm=TranslationMemory(tm_path))
+                                     tm=_open_memory(tm_path, tm_backend))
         out_path = Path(d) / f"{Path(upload.name).stem}_{tgt}.docx"
         build_docx(out, tgt, str(out_path))
         st.session_state["docx"] = (out_path.name, out_path.read_bytes())

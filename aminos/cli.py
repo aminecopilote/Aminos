@@ -9,6 +9,14 @@ from . import checks
 from .glossary import Glossary, import_path
 
 
+def _open_memory(path, backend="sqlite", embedding="hash"):
+    if backend == "chroma":
+        from .chroma_memory import SemanticMemory
+        return SemanticMemory(path, embedding)
+    from .tm import TranslationMemory
+    return TranslationMemory(path)
+
+
 def _cmd_import(a) -> int:
     g = import_path(a.path, (a.src_col, a.tgt_col))
     g.save(a.out)
@@ -44,7 +52,7 @@ def _cmd_translate(a) -> int:
     g = Glossary.load(a.glossary) if a.glossary else Glossary()
     ocr = {"claude": ocr_claude, "tesseract": lambda: ocr_tesseract(), None: lambda: None}[a.ocr]()
     paragraphs = extract_paragraphs(a.file, ocr)
-    tm = TranslationMemory(a.tm) if a.tm else None
+    tm = _open_memory(a.tm, a.tm_backend, a.embedding) if a.tm else None
     out = translate_document(build_chat(a.provider, a.model, a.allow_free_tier), paragraphs, a.source, a.target, g, a.mode,
                              a.jurisdiction, tm=tm)
     build_docx(out, a.target, a.out)
@@ -90,8 +98,7 @@ def _cmd_providers(a) -> int:
 
 
 def _cmd_tm(a) -> int:
-    from .tm import TranslationMemory
-    tm = TranslationMemory(a.db)
+    tm = _open_memory(a.db, a.backend, a.embedding)
     if a.action == "import":
         print(f"{tm.import_tsv(a.file, a.source, a.target)} segments importés ({len(tm)} au total)")
     elif a.action == "export":
@@ -128,7 +135,9 @@ def main(argv=None) -> int:
     tp.add_argument("--allow-free-tier", action="store_true",
                     help="accepter l'envoi du texte à un fournisseur tiers (documents NON confidentiels)")
     tp.add_argument("--ocr", choices=["claude", "tesseract"], default=None, help="OCR pour scans/images")
-    tp.add_argument("--tm", help="base SQLite de mémoire de traduction")
+    tp.add_argument("--tm", help="mémoire de traduction : fichier SQLite, ou dossier Chroma avec --tm-backend chroma")
+    tp.add_argument("--tm-backend", choices=["sqlite", "chroma"], default="sqlite")
+    tp.add_argument("--embedding", choices=["hash", "multilingual"], default="hash", help="embedding Chroma")
     tp.set_defaults(fn=_cmd_translate)
 
     cp2 = sub.add_parser("cert", help="traduction certifiée : keygen|next-ref|declaration|eval|build|verify|seal")
@@ -148,6 +157,8 @@ def main(argv=None) -> int:
     mp = sub.add_parser("tm", help="mémoire de traduction : import | export | lookup")
     mp.add_argument("action", choices=["import", "export", "lookup"]); mp.add_argument("db")
     mp.add_argument("file", help="fichier TSV (ou texte à chercher pour lookup)")
+    mp.add_argument("--backend", choices=["sqlite", "chroma"], default="sqlite")
+    mp.add_argument("--embedding", choices=["hash", "multilingual"], default="hash")
     mp.add_argument("-s", "--source", default=""); mp.add_argument("-t", "--target", default="")
     mp.set_defaults(fn=_cmd_tm)
 
