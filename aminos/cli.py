@@ -52,6 +52,34 @@ def _cmd_translate(a) -> int:
     return 0
 
 
+def _cmd_cert(a) -> int:
+    from . import certify as c
+    if a.action == "keygen":
+        c.make_key(a.key); print(f"clé créée : {a.key} (ne jamais la synchroniser ni la partager)"); return 0
+    if a.action == "next-ref":
+        print(c.next_ref(a.registry)); return 0
+    if a.action == "declaration":
+        print(c.declaration(a.source, a.target, a.ref, a.date)); return 0
+    if a.action == "eval":
+        scores = dict(kv.split("=") for kv in a.scores.split(",")) if a.scores else {}
+        ev = c.Evaluation({k: int(v) for k, v in scores.items()}, a.point or [])
+        c.write_evaluation(a.file, a.ref, ev)
+        print(f"fiche écrite : {a.file} ; seuil {'atteint' if ev.passes() else 'NON atteint'} ; en attente de validation d'Alami")
+        return 0 if ev.passes() else 1
+    if a.action == "build":
+        from .extract import extract_paragraphs
+        r = c.certify(extract_paragraphs(a.file), a.source, a.target, a.key, a.registry, a.out_dir, a.ref, a.date)
+        n = c.page_count(r["path"])
+        print(f"{r['ref']} -> {r['path']} (pages : {n if n else 'non contrôlé'}) ; en attente d'évaluation et de scellé")
+        return 0
+    if a.action == "verify":
+        ok = c.verify(a.file, a.key, a.registry, a.ref)
+        print("VALIDE" if ok else "INVALIDE"); return 0 if ok else 1
+    if a.action == "seal":
+        c.seal(a.file, a.key, a.registry, a.ref, a.eval); print(f"{a.ref} scellé"); return 0
+    return 2
+
+
 def _cmd_providers(a) -> int:
     from .providers import PROVIDERS
     import os
@@ -102,6 +130,17 @@ def main(argv=None) -> int:
     tp.add_argument("--ocr", choices=["claude", "tesseract"], default=None, help="OCR pour scans/images")
     tp.add_argument("--tm", help="base SQLite de mémoire de traduction")
     tp.set_defaults(fn=_cmd_translate)
+
+    cp2 = sub.add_parser("cert", help="traduction certifiée : keygen|next-ref|declaration|eval|build|verify|seal")
+    cp2.add_argument("action", choices=["keygen", "next-ref", "declaration", "eval", "build", "verify", "seal"])
+    cp2.add_argument("file", nargs="?", help="document (build/verify/seal) ou fiche (eval)")
+    cp2.add_argument("-s", "--source"); cp2.add_argument("-t", "--target")
+    cp2.add_argument("--ref"); cp2.add_argument("--date")
+    cp2.add_argument("--key", default="cle-hmac.key"); cp2.add_argument("--registry", default="registre-certifications.csv")
+    cp2.add_argument("--out-dir", default="archive"); cp2.add_argument("--eval", help="fiche d'évaluation validée (seal)")
+    cp2.add_argument("--scores", help="fidelite=5,terminologie=4,conformite_marocaine=4,structure=5,ponctuation=5,formats=5")
+    cp2.add_argument("--point", action="append", help="point à confirmer sur l'original (répétable)")
+    cp2.set_defaults(fn=_cmd_cert)
 
     pp = sub.add_parser("providers", help="lister les fournisseurs LLM gratuits")
     pp.set_defaults(fn=_cmd_providers)

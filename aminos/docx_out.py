@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 
 from . import prompts
+from .certify import isolate_digits
 
 _BOLD = re.compile(r"(\*\*.+?\*\*)")
 
@@ -24,11 +25,14 @@ def build_docx(paragraphs: list[str], target_lang: str, path: str, font: str = "
         sec.left_margin = sec.right_margin = sec.top_margin = sec.bottom_margin = Cm(1.27)
 
     for text in paragraphs:
+        if rtl:
+            text = isolate_digits(text)
         p = doc.add_paragraph()
         p.paragraph_format.line_spacing = 1.0
         if rtl:
             p._p.get_or_add_pPr().append(OxmlElement("w:bidi"))
-            p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+            # in a bidi paragraph "left" is the line start, i.e. the right margin ("right" would align left)
+            p.alignment = WD_ALIGN_PARAGRAPH.LEFT
         for part in filter(None, _BOLD.split(text)):
             bold = part.startswith("**") and part.endswith("**") and len(part) > 4
             run = p.add_run(part[2:-2] if bold else part)
