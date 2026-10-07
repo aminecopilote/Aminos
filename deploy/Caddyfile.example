@@ -1,0 +1,11 @@
+# Optional public access with HTTPS + password (needs a DOMAIN name pointing to the VPS: Let's Encrypt
+# does not issue certificates for a bare IP). Ports 80/443 are already used on this VPS: check first
+# (`ss -ltnp | grep -E ':80|:443'`) and merge this block into the existing web server instead of running a second one.
+#
+# Generate the hash:  docker run --rm caddy caddy hash-password --plaintext 'a-long-passphrase'
+aminos.example.com {
+	basic_auth {
+		alami <PASTE_HASH_HERE>
+	}
+	reverse_proxy 127.0.0.1:8501
+}

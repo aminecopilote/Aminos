@@ -12,8 +12,10 @@ Atelier de traduction juridique (AR / FR / EN) : moteur de terminologie, contrô
 - **Sortie .docx** : `**gras**` converti en vrai gras, RTL pour l'arabe, Calibri 10, interligne 1,0, marges 1,27 cm.
 - **Extraction PDF / scans / images** : texte natif des PDF (pdfplumber), OCR automatique des pages sans couche texte et des images `.png/.jpg/.webp`, via `--ocr claude` (vision, transcrit aussi cachets et sceaux) ou `--ocr tesseract` (hors ligne, `ara+fra+eng`). Les glossaires `.pdf` à tableaux sont aussi importables.
 - **Mémoire de traduction** (SQLite, `--tm tm.sqlite`) : les paragraphes déjà traduits (≥ 98 % de similitude) sont réutilisés sans appel au modèle ; les traductions sans anomalie sont enregistrées. `aminos tm import|export|lookup` pour échanger en TSV et interroger les correspondances approchées.
-- **Interface web** (`streamlit run app.py`) : envoi du document et des glossaires, choix des langues/mode/OCR, vue source/traduction côte à côte, alertes de contrôle, téléchargement du .docx.
+- **Mémoire sémantique Chroma** (`--tm-backend chroma`, `pip install chromadb`) : mémoire de traduction vectorielle persistante (dossier) avec correspondances approchées, et recherche sémantique dans le glossaire (`SemanticMemory.index_glossary` / `similar_terms`) pour les formes fléchies que la détection exacte manque. Embedding `hash` par défaut (local, hors ligne, sans téléchargement) ou `--embedding multilingual` (sentence-transformers, meilleur sur les paraphrases). **Garde-fou** : un segment dont les nombres ou dates diffèrent est plafonné à 90 % et n'est jamais réutilisé tel quel (seuil de réutilisation 98 %). Ce garde-fou protège aussi la mémoire SQLite, où une année différente dans un long paragraphe passait à 99,8 %.
+- **Interface web** (`streamlit run app.py`) en trois onglets : **Traduction** (document, glossaires, langues, mode, fournisseurs, OCR, mémoire SQLite ou Chroma), **Relecture** (texte éditable, contrôles terminologie/nombres/segments recalculés à chaque correction, vue côte à côte) et **Certification** (clé HMAC, numéro, document d'une page avec contrôle du nombre de pages, évaluation à six critères, case de validation d'Alami, scellé). Le bouton « Sceller » reste désactivé tant que le seuil n'est pas atteint et que la validation n'est pas cochée. À lancer **en local** : la clé HMAC doit rester sur votre machine.
 - **LLM gratuits** (`providers.py`, d'après [mnfst/awesome-free-llm-apis](https://github.com/mnfst/awesome-free-llm-apis)) : `--provider ollama,mistral,groq` essaie les fournisseurs dans l'ordre et passe au suivant en cas de limite (429) ou de panne ; `aminos providers` les liste avec l'état de la clé. Disponibles : ollama (local), groq, mistral, gemini, openrouter, nvidia, huggingface, ovh (sans clé, UE). **Confidentialité** : seul `ollama` garde le document sur votre machine ; les autres sont refusés sauf `--allow-free-tier` (certains paliers gratuits peuvent servir à l'entraînement). Ne les utilisez pas pour des pièces confidentielles. Les modèles par défaut et les limites changent vite : vérifiez la liste et utilisez `--model`.
+- **Traduction certifiée** (`aminos cert`) : numéro `NNNNN.AAAA` par document (registre CSV), déclaration de fidélité dans la seule langue de la traduction (fr/ar/en, Rabat, date en toutes lettres, mois marocains en arabe), `.docx` d'une page (Calibri, marges 1,27 cm, sans en-tête ni pied de page, bannière « TRADUCTION CERTIFIÉE CONFORME » dans le corps, ligne « FIN DE TRADUCTION »), arabe collé à la marge droite avec dates isolées. **CODE** = HMAC-SHA256 du texte (imprimé dans le QR) ; **SCEAU** = HMAC du fichier, calculé seulement après validation. Fiche d'évaluation à six critères (fidélité 5/5, autres ≥ 4/5) : `cert seal` refuse tant que la fiche ne porte pas `Validation Alami : oui`. Sans la clé, rien ne se certifie ; la clé (`cert keygen`) ne doit jamais être synchronisée ni jointe à une livraison.
 - Règles de style du traducteur (noms en gras, **NOM** en majuscules, cachets, logos, aucun commentaire) dans `aminos/prompts.py`.
 
 ## Utilisation
@@ -34,12 +36,42 @@ aminos translate acte.docx -s arabe -t français -g glossary.json -m normal --ju
 # 3b. Scan ou PDF image, avec mémoire de traduction
 aminos translate scan.pdf -s arabe -t français --ocr claude --tm tm.sqlite -g glossary.json -o scan_fr.docx
 
+# 3c. Traduction certifiée (clé et registre restent sur votre PC)
+aminos cert keygen --key cle-hmac.key
+aminos cert build traduction.docx -s arabe -t français --key cle-hmac.key --registry registre.csv --out-dir archive
+aminos cert eval evaluations/00001.2026.md --ref 00001.2026 --scores fidelite=5,terminologie=4,conformite_marocaine=4,structure=5,ponctuation=5,formats=5
+#   -> Alami relit, contrôle sur l'original, puis écrit « Validation Alami : oui » dans la fiche
+aminos cert verify archive/00001.2026.docx --ref 00001.2026 --key cle-hmac.key --registry registre.csv
+aminos cert seal archive/00001.2026.docx --ref 00001.2026 --key cle-hmac.key --registry registre.csv --eval evaluations/00001.2026.md
+
 # 4. Contrôler une traduction existante
 aminos check source.txt traduction.txt -g glossary.json
 ```
 
 Tests : `python -m unittest discover -s tests`.
 
+## Déploiement sur un VPS (Docker)
+
+Sur le VPS, en utilisateur normal membre du groupe `docker` :
+
+```bash
+git clone https://github.com/aminecopilote/Aminos.git && cd Aminos
+git checkout claude/legal-translator-features-idkryx      # ou main une fois la PR fusionnée
+bash deploy/install.sh        # 1er passage : crée .env (droits 600) ; renseignez ANTHROPIC_API_KEY ; relancez
+```
+
+L'application écoute **uniquement sur `127.0.0.1:8501`** du serveur. Depuis votre PC :
+
+```bash
+ssh -L 8501:127.0.0.1:8501 utilisateur@209.90.232.44      # puis http://localhost:8501
+```
+
+Pourquoi un tunnel plutôt qu'une URL publique : l'interface n'a pas de connexion, elle traite des pièces confidentielles et, dans l'onglet Certification, utilise la clé HMAC. Ne publiez jamais le port 8501. Si vous voulez un accès public, utilisez un nom de domaine et `deploy/Caddyfile.example` (HTTPS + mot de passe) en l'intégrant au serveur web déjà présent sur les ports 80/443.
+
+Les données (mémoire de traduction, registre, archive, **clé HMAC**) sont dans le volume Docker `aminos-data`, hors de l'image. Pour une clé qui ne quitte jamais votre PC, certifiez en local et n'utilisez le VPS que pour traduire. Options de build : `INSTALL_LIBREOFFICE=1` (contrôle « une page »), `INSTALL_TESSERACT=1` (OCR hors ligne) dans `docker-compose.yml`. Mise à jour : `git pull && docker compose up -d --build`.
+
 ## Limites
+
+La certification d'Aminos est une implémentation indépendante : ses codes HMAC ne sont **pas** interchangeables avec ceux de vos outils locaux `certifier.py`/`declaration.py`, que je n'ai pas pu lire. Ne mélangez pas les deux registres. Le contrôle « une page » utilise LibreOffice si présent ; sinon la taille de police est estimée. Le PDF final (Power PDF), la lecture des QR de l'original et le signalement des mentions illisibles restent manuels. Aucune certification sur une lecture incertaine : l'évaluation sert de point d'arrêt.
 
 Le dossier Windows n'est pas lisible depuis la session cloud : les glossaires doivent être importés en local ou copiés dans le dépôt. Les `.doc` (non `.docx`) ne sont pas lus. Testés ici avec un faux modèle : extraction d'un PDF texte et d'un PDF scanné (OCR simulé), CLI de bout en bout, mémoire de traduction, affichage de l'interface web. Non testés : OCR Claude/Tesseract réels, appels au modèle réels, envoi de fichier dans l'interface web. La mise en page est reproduite au niveau du paragraphe.
