@@ -38,17 +38,26 @@ def _cmd_check(a) -> int:
 def _cmd_translate(a) -> int:
     from .docx_out import build_docx
     from .extract import extract_paragraphs, ocr_claude, ocr_tesseract
-    from .llm import anthropic_chat
+    from .providers import build_chat
     from .pipeline import translate_document
     from .tm import TranslationMemory
     g = Glossary.load(a.glossary) if a.glossary else Glossary()
     ocr = {"claude": ocr_claude, "tesseract": lambda: ocr_tesseract(), None: lambda: None}[a.ocr]()
     paragraphs = extract_paragraphs(a.file, ocr)
     tm = TranslationMemory(a.tm) if a.tm else None
-    out = translate_document(anthropic_chat(a.model), paragraphs, a.source, a.target, g, a.mode,
+    out = translate_document(build_chat(a.provider, a.model, a.allow_free_tier), paragraphs, a.source, a.target, g, a.mode,
                              a.jurisdiction, tm=tm)
     build_docx(out, a.target, a.out)
     print(f"{len(out)} paragraphes écrits dans {a.out}")
+    return 0
+
+
+def _cmd_providers(a) -> int:
+    from .providers import PROVIDERS
+    import os
+    for p in PROVIDERS.values():
+        ready = "prêt" if not p.env_key or os.environ.get(p.env_key) else f"clé {p.env_key} absente"
+        print(f"{p.name:12} {p.data_policy:10} {p.model:42} {ready}  {p.note}")
     return 0
 
 
@@ -85,10 +94,17 @@ def main(argv=None) -> int:
     tp.add_argument("file"); tp.add_argument("-o", "--out", required=True)
     tp.add_argument("-s", "--source", required=True); tp.add_argument("-t", "--target", required=True)
     tp.add_argument("-g", "--glossary"); tp.add_argument("-m", "--mode", choices=["fast", "normal", "hard"], default="normal")
-    tp.add_argument("--model", default="claude-sonnet-5-5"); tp.add_argument("--jurisdiction", default="")
+    tp.add_argument("--model", default=None, help="modèle (défaut propre à chaque fournisseur)"); tp.add_argument("--jurisdiction", default="")
+    tp.add_argument("-p", "--provider", default="anthropic",
+                    help="anthropic ou liste de repli : ollama,mistral,groq,gemini,openrouter,nvidia,huggingface,ovh")
+    tp.add_argument("--allow-free-tier", action="store_true",
+                    help="accepter l'envoi du texte à un fournisseur tiers (documents NON confidentiels)")
     tp.add_argument("--ocr", choices=["claude", "tesseract"], default=None, help="OCR pour scans/images")
     tp.add_argument("--tm", help="base SQLite de mémoire de traduction")
     tp.set_defaults(fn=_cmd_translate)
+
+    pp = sub.add_parser("providers", help="lister les fournisseurs LLM gratuits")
+    pp.set_defaults(fn=_cmd_providers)
 
     mp = sub.add_parser("tm", help="mémoire de traduction : import | export | lookup")
     mp.add_argument("action", choices=["import", "export", "lookup"]); mp.add_argument("db")

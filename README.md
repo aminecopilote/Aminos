@@ -13,13 +13,14 @@ Atelier de traduction juridique (AR / FR / EN) : moteur de terminologie, contrô
 - **Extraction PDF / scans / images** : texte natif des PDF (pdfplumber), OCR automatique des pages sans couche texte et des images `.png/.jpg/.webp`, via `--ocr claude` (vision, transcrit aussi cachets et sceaux) ou `--ocr tesseract` (hors ligne, `ara+fra+eng`). Les glossaires `.pdf` à tableaux sont aussi importables.
 - **Mémoire de traduction** (SQLite, `--tm tm.sqlite`) : les paragraphes déjà traduits (≥ 98 % de similitude) sont réutilisés sans appel au modèle ; les traductions sans anomalie sont enregistrées. `aminos tm import|export|lookup` pour échanger en TSV et interroger les correspondances approchées.
 - **Interface web** (`streamlit run app.py`) : envoi du document et des glossaires, choix des langues/mode/OCR, vue source/traduction côte à côte, alertes de contrôle, téléchargement du .docx.
+- **LLM gratuits** (`providers.py`, d'après [mnfst/awesome-free-llm-apis](https://github.com/mnfst/awesome-free-llm-apis)) : `--provider ollama,mistral,groq` essaie les fournisseurs dans l'ordre et passe au suivant en cas de limite (429) ou de panne ; `aminos providers` les liste avec l'état de la clé. Disponibles : ollama (local), groq, mistral, gemini, openrouter, nvidia, huggingface, ovh (sans clé, UE). **Confidentialité** : seul `ollama` garde le document sur votre machine ; les autres sont refusés sauf `--allow-free-tier` (certains paliers gratuits peuvent servir à l'entraînement). Ne les utilisez pas pour des pièces confidentielles. Les modèles par défaut et les limites changent vite : vérifiez la liste et utilisez `--model`.
 - Règles de style du traducteur (noms en gras, **NOM** en majuscules, cachets, logos, aucun commentaire) dans `aminos/prompts.py`.
 
 ## Utilisation
 
 ```bash
 pip install -e ".[all]"
-export ANTHROPIC_API_KEY=...
+export ANTHROPIC_API_KEY=...        # ou GROQ_API_KEY, MISTRAL_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY...
 
 # 1. Importer vos glossaires (dossier « مسارد، قواميس ومعاجم » copié dans le dépôt ou en local)
 aminos glossary-import "C:\Users\verta\Downloads\مسارد، قواميس ومعاجم" -o glossary.json --src-col 0 --tgt-col 1

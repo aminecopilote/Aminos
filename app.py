@@ -9,7 +9,7 @@ from aminos import checks
 from aminos.docx_out import build_docx
 from aminos.extract import extract_paragraphs, ocr_claude, ocr_tesseract
 from aminos.glossary import Glossary, import_file
-from aminos.llm import anthropic_chat
+from aminos.providers import PROVIDERS, build_chat
 from aminos.pipeline import translate_document
 from aminos.tm import TranslationMemory
 
@@ -20,6 +20,8 @@ with st.sidebar:
     key = st.text_input("Clé ANTHROPIC_API_KEY", type="password", value=os.environ.get("ANTHROPIC_API_KEY", ""))
     src = st.selectbox("Langue source", ["arabe", "français", "anglais"])
     tgt = st.selectbox("Langue cible", ["français", "arabe", "anglais"], index=0)
+    provider = st.multiselect("Fournisseur(s) LLM (ordre = repli)", ["anthropic", *PROVIDERS], default=["anthropic"])
+    allow_free = st.checkbox("J'accepte l'envoi du texte à un tiers (document NON confidentiel)")
     mode = st.radio("Mode", ["fast", "normal", "hard"], index=1)
     ocr_kind = st.selectbox("OCR (scans, images)", ["aucun", "claude", "tesseract"])
     juris = st.text_input("Juridiction", "")
@@ -44,7 +46,7 @@ if upload and st.button("Traduire", type="primary"):
         with st.spinner("Extraction…"):
             paragraphs = extract_paragraphs(fp, ocr)
         with st.spinner("Traduction…"):
-            out = translate_document(anthropic_chat(), paragraphs, src, tgt, gloss, mode, juris,
+            out = translate_document(build_chat(",".join(provider) or "anthropic", None, allow_free), paragraphs, src, tgt, gloss, mode, juris,
                                      tm=TranslationMemory(tm_path))
         out_path = Path(d) / f"{Path(upload.name).stem}_{tgt}.docx"
         build_docx(out, tgt, str(out_path))
