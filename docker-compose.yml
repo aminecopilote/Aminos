@@ -1,0 +1,28 @@
+# Aminos — safe default: published on the server's loopback only (127.0.0.1:8501).
+# Reach it from your PC with an SSH tunnel:   ssh -L 8501:127.0.0.1:8501 user@VPS   then http://localhost:8501
+# Do NOT change the binding to 0.0.0.0: the app has no login and handles confidential documents.
+services:
+  aminos:
+    build:
+      context: .
+      args:
+        INSTALL_LIBREOFFICE: "0"   # set to "1" to check that certified documents fit on one page
+        INSTALL_TESSERACT: "0"     # set to "1" for offline OCR
+    image: aminos:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8501:8501"
+    env_file:
+      - path: .env                 # ANTHROPIC_API_KEY=..., GROQ_API_KEY=... (never commit this file)
+        required: false
+    volumes:
+      - aminos-data:/data
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /home/aminos/.streamlit
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+volumes:
+  aminos-data:

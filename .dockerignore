@@ -1,0 +1,13 @@
+.git
+__pycache__
+*.pyc
+tests
+deploy
+*.key
+registre-certifications.csv
+archive
+evaluations
+tm.sqlite
+tm_chroma
+glossary.json
+.env

@@ -50,6 +50,26 @@ aminos check source.txt traduction.txt -g glossary.json
 
 Tests : `python -m unittest discover -s tests`.
 
+## Déploiement sur un VPS (Docker)
+
+Sur le VPS, en utilisateur normal membre du groupe `docker` :
+
+```bash
+git clone https://github.com/aminecopilote/Aminos.git && cd Aminos
+git checkout claude/legal-translator-features-idkryx      # ou main une fois la PR fusionnée
+bash deploy/install.sh        # 1er passage : crée .env (droits 600) ; renseignez ANTHROPIC_API_KEY ; relancez
+```
+
+L'application écoute **uniquement sur `127.0.0.1:8501`** du serveur. Depuis votre PC :
+
+```bash
+ssh -L 8501:127.0.0.1:8501 utilisateur@209.90.232.44      # puis http://localhost:8501
+```
+
+Pourquoi un tunnel plutôt qu'une URL publique : l'interface n'a pas de connexion, elle traite des pièces confidentielles et, dans l'onglet Certification, utilise la clé HMAC. Ne publiez jamais le port 8501. Si vous voulez un accès public, utilisez un nom de domaine et `deploy/Caddyfile.example` (HTTPS + mot de passe) en l'intégrant au serveur web déjà présent sur les ports 80/443.
+
+Les données (mémoire de traduction, registre, archive, **clé HMAC**) sont dans le volume Docker `aminos-data`, hors de l'image. Pour une clé qui ne quitte jamais votre PC, certifiez en local et n'utilisez le VPS que pour traduire. Options de build : `INSTALL_LIBREOFFICE=1` (contrôle « une page »), `INSTALL_TESSERACT=1` (OCR hors ligne) dans `docker-compose.yml`. Mise à jour : `git pull && docker compose up -d --build`.
+
 ## Limites
 
 La certification d'Aminos est une implémentation indépendante : ses codes HMAC ne sont **pas** interchangeables avec ceux de vos outils locaux `certifier.py`/`declaration.py`, que je n'ai pas pu lire. Ne mélangez pas les deux registres. Le contrôle « une page » utilise LibreOffice si présent ; sinon la taille de police est estimée. Le PDF final (Power PDF), la lecture des QR de l'original et le signalement des mentions illisibles restent manuels. Aucune certification sur une lecture incertaine : l'évaluation sert de point d'arrêt.
