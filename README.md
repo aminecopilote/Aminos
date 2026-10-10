@@ -47,3 +47,20 @@ Le dossier Windows n'est pas lisible depuis la session cloud : les glossaires do
 ## Compétence OpenClaw : catalogue d'agents IA
 
 `skills/ai-agents-catalog/` contient une compétence OpenClaw (SKILL.md + catalogue hors ligne de 132 projets tirés de [500-AI-Agents-Projects](https://github.com/ashishpatel26/500-AI-Agents-Projects), licence MIT). Installation : `skills/ai-agents-catalog/install.sh [dossier_workspace]` (défaut `~/.openclaw/workspace`) ou `openclaw skills install skills/ai-agents-catalog`, puis ouvrir une nouvelle session. Les projets listés sont du code tiers : à lire et exécuter en bac à sable.
+
+## Dépôts externes : agency-agents et 500-AI-Agents-Projects
+
+`external/` clone [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents) (agents spécialisés, MIT) et [ashishpatel26/500-AI-Agents-Projects](https://github.com/ashishpatel26/500-AI-Agents-Projects) (liste de projets, rien à installer) dans `~/aminos-external`, puis installe les agents dans Claude Code (`~/.claude/agents`).
+
+```bash
+# Ubuntu
+./external/install.sh                                  # tous les agents
+./external/install.sh --tool claude-code --division engineering
+```
+```powershell
+# Windows (Git for Windows ou WSL requis : l'installateur d'agency-agents est un script bash)
+.\external\install.ps1
+.\external\install.ps1 -Tool claude-code -Division engineering
+```
+
+Relancer le script met les dépôts à jour. Code tiers : à lire avant usage. Non testé ici : le réseau de la session cloud bloque github.com (403), les scripts n'ont été vérifiés que syntaxiquement.
