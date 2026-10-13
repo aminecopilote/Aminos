@@ -5,7 +5,11 @@ import sqlite3
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
+from .checks import numbers
 from .normalize import normalize
+
+
+FUZZY_CAP = 0.90
 
 
 @dataclass
@@ -32,12 +36,14 @@ class TranslationMemory:
         return self.db.execute("SELECT COUNT(*) FROM tm").fetchone()[0]
 
     def lookup(self, source: str, src_lang: str, tgt_lang: str, threshold: float = 0.75, limit: int = 3) -> list[Match]:
-        norm = normalize(source)
+        norm, wanted = normalize(source), numbers(source)
         rows = self.db.execute("SELECT norm, source, target FROM tm WHERE src_lang=? AND tgt_lang=?",
                                (src_lang, tgt_lang)).fetchall()
         out = []
         for n, s, t in rows:
             score = 1.0 if n == norm else SequenceMatcher(None, norm, n, autojunk=False).ratio()
+            if n != norm and numbers(s) != wanted:
+                score = min(score, FUZZY_CAP)  # different figures/dates: a hint, never a reusable translation
             if score >= threshold:
                 out.append(Match(s, t, score))
         return sorted(out, key=lambda m: -m.score)[:limit]
