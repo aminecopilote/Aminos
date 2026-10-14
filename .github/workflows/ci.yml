@@ -143,12 +143,13 @@ jobs:
             if ($log) { break }; Start-Sleep 3
           }
           if (-not $log) { Get-Content C:\Aminos\logs\orchestrator.log -ErrorAction SilentlyContinue; throw "no orchestrator cycle logged" }
-          $rec = (Get-Content $log.FullName -TotalCount 1) | ConvertFrom-Json
+          $rec = (Get-Content $log.FullName -TotalCount 1 -Encoding UTF8) | ConvertFrom-Json
           foreach ($k in "timestamp","cycle_id","observations","analysis","decision","actions","next_check_seconds") { if (-not ($rec.PSObject.Properties.Name -contains $k)) { throw "missing key $k" } }
           $o = $rec.observations
           Write-Host "decision: $($rec.decision) | analysis: $($rec.analysis)"
           foreach ($k in "cpu_top","mem","counters","net_listen") {
-            if ($o.$k.error) { throw "collector $k failed on Windows: $($o.$k.error)" }
+            # an error is a single object {"error": ...}; on an array, ".error" would enumerate the elements and be "truthy"
+            if (($o.$k -is [System.Management.Automation.PSCustomObject]) -and ($o.$k.PSObject.Properties.Name -contains "error")) { throw "collector $k failed on Windows: $($o.$k.error)" }
             if (-not $o.$k) { throw "collector $k returned nothing" }
           }
           if ($rec.alerts -match "indisponibles") { throw "orchestrator could not measure CPU/memory on Windows" }
