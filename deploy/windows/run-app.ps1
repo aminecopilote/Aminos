@@ -1,0 +1,27 @@
+# Started by the "Aminos" scheduled task (or by hand). Logs: <install dir>\logs\app.log
+param([string]$Dir = (Split-Path -Parent $MyInvocation.MyCommand.Path), [int]$Port = 8501, [switch]$Saas)
+$ErrorActionPreference = "Stop"
+New-Item -ItemType Directory -Force -Path "$Dir\logs", "$Dir\data" | Out-Null
+$log = "$Dir\logs\app.log"
+function Log($m) { Add-Content -Path $log -Value ("[{0}] {1}" -f (Get-Date -Format s), $m) }
+Log "run-app.ps1 started (PowerShell $($PSVersionTable.PSVersion), user $env:USERNAME)"
+try {
+    Set-Location "$Dir\data"      # the app's default translation memory "tm.sqlite" lands here
+    $script = if ($Saas) { "saas_app.py" } else { "app.py" }
+    if ($Saas -and (Test-Path "$Dir\saas.env")) {   # secrets live in a protected file, not on the command line
+        foreach ($line in Get-Content "$Dir\saas.env") { $k, $v = $line -split "=", 2; if ($k) { Set-Item -Path "Env:$k" -Value $v } }
+    }
+    $streamlit = "$Dir\venv\Scripts\streamlit.exe"
+    if (-not (Test-Path $streamlit)) { throw "missing $streamlit" }
+    Log "launching $streamlit on 127.0.0.1:$Port"
+    # Streamlit prints its start-up banner on stderr; with "Stop" PowerShell would turn that into a fatal error
+    # and kill the app one second after it started.
+    $ErrorActionPreference = "Continue"
+    & $streamlit run "$Dir\app\$script" --server.address=127.0.0.1 --server.port=$Port `
+        --server.headless=true --browser.gatherUsageStats=false --server.maxUploadSize=50 2>&1 |
+        ForEach-Object { Add-Content -Path $log -Value "$_" }
+    Log "streamlit exited with code $LASTEXITCODE"
+} catch {
+    Log "ERROR: $_"
+    exit 1
+}

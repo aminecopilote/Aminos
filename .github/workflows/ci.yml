@@ -1,0 +1,255 @@
+name: ci
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Core tests only (no optional dependency)
+        run: python -m unittest discover -s tests
+      - name: Install with notarisation and swarm extras
+        run: pip install -e ".[notary,swarm,docx,test]"
+      - name: Full tests (notary seals verified independently with openssl)
+        run: python -m unittest discover -s tests
+
+  vendor:
+    # Third-party repos at pinned commits, run in isolation. Informational: their failures are not ours.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: lab/vendor_test.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: vendor-results, path: lab/results }
+
+  docker:
+    # Builds the real deploy/Dockerfile (including the apt layer with Tesseract) and checks the app answers.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose file is valid
+        run: AMINOS_ADMIN_USER=x AMINOS_ADMIN_PASSWORD=x docker compose -f deploy/docker-compose.yml config --quiet
+      - name: Build image
+        run: docker build -f deploy/Dockerfile -t aminos:ci .
+      - name: App starts and is healthy; OCR languages and optional extras are present
+        run: |
+          docker run -d --name aminos -p 8501:8501 aminos:ci
+          for i in $(seq 30); do curl -fsS http://127.0.0.1:8501/_stcore/health && break; sleep 2; done
+          docker exec aminos tesseract --list-langs | grep -E "ara|fra|eng|nld"
+          docker exec aminos python -c "import agent_coordinator, pyhanko, cryptography; print('extras ok')"
+          docker exec aminos id -u | grep -qx 10001
+
+  windows-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: deploy/package_all.sh        # builds dist/aminos-windows.zip (used by the windows jobs) and the complete package
+      - uses: actions/upload-artifact@v4
+        with: { name: aminos-windows, path: dist/aminos-windows.zip }
+      - uses: actions/upload-artifact@v4
+        with: { name: aminos-complet, path: "dist/Aminos-complet-*.zip" }
+
+  windows:
+    # Installs the bundle on a real Windows machine (single-user with a shared password, and multi-user "saas" mode).
+    needs: windows-bundle
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [single, saas, full]
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - uses: actions/download-artifact@v4
+        with: { name: aminos-windows }
+      - name: Install per user (Windows PowerShell 5.1; the runner is not elevated, so no boot task; Caddy over HTTP)
+        shell: powershell
+        run: |
+          Expand-Archive aminos-windows.zip -DestinationPath bundle
+          Set-Location bundle\aminos-windows
+          $extra = @{}   # a hashtable splats as named parameters; an array would pass "-Saas" as a positional value
+          if ("${{ matrix.mode }}" -ne "single") { $extra["Saas"] = $true }
+          if ("${{ matrix.mode }}" -eq "full") {
+            $extra["Orchestrator"] = $true; $extra["Agency"] = $true
+            $extra["Skills"] = @("chatgpt-skills:document-converter-suite")
+          }
+          .\install.ps1 -Dir C:\Aminos -Domain "http://localhost:8080" -NoService @extra
+      - name: App healthy and extras importable
+        shell: powershell
+        run: |
+          $ok = $false
+          foreach ($i in 1..60) {
+            try { if ((Invoke-WebRequest http://127.0.0.1:8501/_stcore/health -UseBasicParsing).Content -eq "ok") { $ok = $true; break } } catch { }
+            Start-Sleep 3
+          }
+          if (-not $ok) {
+            Write-Host "--- logs dir"; Get-ChildItem C:\Aminos\logs -ErrorAction SilentlyContinue | Format-Table Name, Length
+            Write-Host "--- app.log"; Get-Content C:\Aminos\logs\app.log -ErrorAction SilentlyContinue
+            Write-Host "--- processes"; Get-Process | Where-Object { $_.Name -match "streamlit|python|powershell|caddy" } | Format-Table Id, Name, Path
+            Write-Host "--- listeners"; Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in 8501, 8080 } | Format-Table LocalAddress, LocalPort, OwningProcess
+            throw "app not healthy"
+          }
+          & C:\Aminos\venv\Scripts\python.exe -c "import aminos, aminos.saas, agent_coordinator, pyhanko, cryptography, docx, streamlit; print('extras ok')"
+          if ($LASTEXITCODE -ne 0) { throw "import failed" }
+          & C:\Aminos\venv\Scripts\aminos.exe notary init -w C:\nw
+          if ($LASTEXITCODE -ne 0) { throw "notary init failed" }
+      - name: Single-user mode asks for the shared password
+        if: matrix.mode == 'single'
+        shell: powershell
+        run: |
+          try { Invoke-WebRequest http://localhost:8080/ -UseBasicParsing | Out-Null; throw "no password asked" } catch { if ($_.Exception.Response.StatusCode.value__ -ne 401) { throw } }
+          $pw = (Get-Content C:\Aminos\FIRST_PASSWORD.txt).Trim()
+          $h = @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("aminos:$pw")) }
+          if ((Invoke-WebRequest http://localhost:8080/_stcore/health -Headers $h -UseBasicParsing).Content -ne "ok") { throw "proxy with password failed" }
+      - name: Multi-user mode - app reachable, administrator can sign in, wrong password cannot
+        if: matrix.mode != 'single'
+        shell: powershell
+        run: |
+          if ((Invoke-WebRequest http://localhost:8080/_stcore/health -UseBasicParsing).Content -ne "ok") { throw "not reachable through Caddy" }
+          if (-not (Test-Path C:\Aminos\saas.env)) { throw "saas.env missing" }
+          $pw = (Get-Content C:\Aminos\FIRST_PASSWORD.txt).Trim()
+          $code = @'
+          import sys
+          from aminos.saas import AuthError, SaaSStore
+          s = SaaSStore(r"C:\Aminos\data\saas")
+          s.bootstrap_admin("admin", sys.argv[1])
+          assert s.authenticate("admin", sys.argv[1]).is_admin
+          try:
+              s.authenticate("admin", "wrong-password-xx"); raise SystemExit("wrong password accepted")
+          except AuthError:
+              print("saas auth ok on Windows")
+          '@
+          Set-Content -Path C:\check_saas.py -Value $code
+          & C:\Aminos\venv\Scripts\python.exe C:\check_saas.py $pw
+          if ($LASTEXITCODE -ne 0) { throw "saas check failed" }
+      - name: Orchestrator collectors work on real Windows (full mode)
+        if: matrix.mode == 'full'
+        shell: powershell
+        run: |
+          $log = $null
+          foreach ($i in 1..40) {
+            $log = Get-ChildItem C:\orchestrator\logs\orch-*.jsonl -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($log) { break }; Start-Sleep 3
+          }
+          if (-not $log) { Get-Content C:\Aminos\logs\orchestrator.log -ErrorAction SilentlyContinue; throw "no orchestrator cycle logged" }
+          $rec = (Get-Content $log.FullName -TotalCount 1 -Encoding UTF8) | ConvertFrom-Json
+          foreach ($k in "timestamp","cycle_id","observations","analysis","decision","actions","next_check_seconds") { if (-not ($rec.PSObject.Properties.Name -contains $k)) { throw "missing key $k" } }
+          $o = $rec.observations
+          Write-Host "decision: $($rec.decision) | analysis: $($rec.analysis)"
+          foreach ($k in "cpu_top","mem","counters","net_listen") {
+            # an error is a single object {"error": ...}; on an array, ".error" would enumerate the elements and be "truthy"
+            if (($o.$k -is [System.Management.Automation.PSCustomObject]) -and ($o.$k.PSObject.Properties.Name -contains "error")) { throw "collector $k failed on Windows: $($o.$k.error)" }
+            if (-not $o.$k) { throw "collector $k returned nothing" }
+          }
+          if ($rec.alerts -match "indisponibles") { throw "orchestrator could not measure CPU/memory on Windows" }
+      - name: agent-hq runs, bound to loopback only (full mode)
+        if: matrix.mode == 'full'
+        shell: powershell
+        run: |
+          $ok = $false
+          foreach ($i in 1..40) { try { if ((Invoke-WebRequest http://127.0.0.1:7700/api/health -UseBasicParsing).Content -match '"ok":true') { $ok = $true; break } } catch { }; Start-Sleep 3 }
+          if (-not $ok) { Get-Content C:\Aminos\logs\agent-hq.log -ErrorAction SilentlyContinue; throw "agent-hq not healthy" }
+          $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notmatch "^127\." -and $_.PrefixOrigin -ne "WellKnown" } | Select-Object -First 1).IPAddress
+          Write-Host "testing the non-loopback address $ip"
+          $reached = $false
+          try { Invoke-WebRequest "http://${ip}:7700/api/health" -UseBasicParsing -TimeoutSec 5 | Out-Null; $reached = $true } catch { }
+          if ($reached) { throw "agent-hq is reachable on $ip : it must listen on 127.0.0.1 only (it has no authentication)" }
+      - name: Skills installed (text only, pinned) and our own skill present (full mode)
+        if: matrix.mode == 'full'
+        shell: powershell
+        run: |
+          if (-not (Test-Path C:\Aminos\skills\chatgpt-skills\document-converter-suite\SKILL.md)) { throw "third-party skill missing" }
+          $bad = Get-ChildItem C:\Aminos\skills\chatgpt-skills -Recurse -File | Where-Object { $_.Extension -in ".py", ".ps1", ".sh", ".bat", ".cmd", ".js", ".ts", ".exe", ".dll" }
+          if ($bad) { throw "script files were copied without --with-scripts: $($bad.FullName -join ', ')" }
+          if (-not (Test-Path C:\Aminos\skills\aminos\orchestrateur-central\SKILL.md)) { throw "own skill missing" }
+          if (-not (Test-Path C:\Aminos\agency\agent-coordinator\pyproject.toml)) { throw "agent-coordinator copy missing" }
+          & C:\Aminos\venv\Scripts\aminos.exe skills verify --dest C:\Aminos\skills
+          if ($LASTEXITCODE -ne 0) { throw "skills verify failed" }
+      - name: Update keeps data and passwords and restarts what was installed
+        if: matrix.mode != 'single'
+        shell: powershell
+        run: |
+          $before = (Get-FileHash C:\Aminos\saas.env).Hash
+          Set-Location bundle\aminos-windows
+          .\update.ps1 -Dir C:\Aminos -NoService
+          $ok = $false
+          foreach ($i in 1..40) { try { if ((Invoke-WebRequest http://127.0.0.1:8501/_stcore/health -UseBasicParsing).Content -eq "ok") { $ok = $true; break } } catch { }; Start-Sleep 3 }
+          if (-not $ok) { Get-Content C:\Aminos\logs\app.log -ErrorAction SilentlyContinue; throw "app not healthy after update" }
+          if ((Get-FileHash C:\Aminos\saas.env).Hash -ne $before) { throw "saas.env changed during update" }
+          $pw = (Get-Content C:\Aminos\saas.env | Where-Object { $_ -like "AMINOS_ADMIN_PASSWORD=*" }).Split("=", 2)[1]
+          & C:\Aminos\venv\Scripts\python.exe C:\check_saas.py $pw
+          if ($LASTEXITCODE -ne 0) { throw "admin cannot sign in after update" }
+      - name: Uninstall removes files and processes, keeps data
+        shell: powershell
+        run: |
+          C:\Aminos\uninstall.ps1 -Dir C:\Aminos
+          if (Get-ScheduledTask -TaskName Aminos* -ErrorAction SilentlyContinue) { throw "tasks remain" }
+          if (Test-Path C:\Aminos\venv) { throw "venv remains" }
+          if (Test-Path C:\Aminos\saas.env) { throw "secrets file remains" }
+          if (-not (Test-Path C:\Aminos\data)) { throw "data was deleted" }
+
+  windows-online:
+    # The one-line online install: bootstrap.ps1 is downloaded from GitHub like a user would, installs from PyPI and GitHub.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - name: Online install (Windows PowerShell 5.1)
+        shell: powershell
+        env:
+          REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $u = "https://raw.githubusercontent.com/${{ github.repository }}/$env:REF/deploy/windows/bootstrap.ps1"
+          Invoke-WebRequest -UseBasicParsing $u -OutFile "$env:TEMP\aminos-bootstrap.ps1"
+          & "$env:TEMP\aminos-bootstrap.ps1" -Repo "${{ github.repository }}" -Ref $env:REF -Dir C:\Aminos -Saas -Orchestrator -Agency -NoService
+      - name: App healthy, administrator can sign in, agent-hq and orchestrator running
+        shell: powershell
+        run: |
+          $ok = $false
+          foreach ($i in 1..60) { try { if ((Invoke-WebRequest http://127.0.0.1:8501/_stcore/health -UseBasicParsing).Content -eq "ok") { $ok = $true; break } } catch { }; Start-Sleep 3 }
+          if (-not $ok) { Get-Content C:\Aminos\logs\app.log -ErrorAction SilentlyContinue; throw "app not healthy" }
+          $pw = (Get-Content C:\Aminos\saas.env | Where-Object { $_ -like "AMINOS_ADMIN_PASSWORD=*" }).Split("=", 2)[1]
+          $code = @'
+          import sys
+          from aminos.saas import AuthError, SaaSStore
+          s = SaaSStore(r"C:\Aminos\data\saas")
+          s.bootstrap_admin("admin", sys.argv[1])
+          assert s.authenticate("admin", sys.argv[1]).is_admin
+          try:
+              s.authenticate("admin", "wrong-password-xx"); raise SystemExit("wrong password accepted")
+          except AuthError:
+              print("saas auth ok (online install)")
+          '@
+          Set-Content -Path C:\check_saas.py -Value $code
+          & C:\Aminos\venv\Scripts\python.exe C:\check_saas.py $pw
+          if ($LASTEXITCODE -ne 0) { throw "admin sign-in failed" }
+          $hq = $false
+          foreach ($i in 1..40) { try { if ((Invoke-WebRequest http://127.0.0.1:7700/api/health -UseBasicParsing).Content -match '"ok":true') { $hq = $true; break } } catch { }; Start-Sleep 3 }
+          if (-not $hq) { Get-Content C:\Aminos\logs\agent-hq.log -ErrorAction SilentlyContinue; throw "agent-hq not healthy" }
+          foreach ($i in 1..40) { if (Get-ChildItem C:\orchestrator\logs\orch-*.jsonl -ErrorAction SilentlyContinue) { break }; Start-Sleep 3 }
+          if (-not (Get-ChildItem C:\orchestrator\logs\orch-*.jsonl -ErrorAction SilentlyContinue)) { throw "no orchestrator cycle" }
+      - name: Online update keeps the administrator password
+        shell: powershell
+        run: |
+          $before = (Get-FileHash C:\Aminos\saas.env).Hash
+          C:\Aminos\update.ps1 -NoService
+          $ok = $false
+          foreach ($i in 1..60) { try { if ((Invoke-WebRequest http://127.0.0.1:8501/_stcore/health -UseBasicParsing).Content -eq "ok") { $ok = $true; break } } catch { }; Start-Sleep 3 }
+          if (-not $ok) { Get-Content C:\Aminos\logs\app.log -ErrorAction SilentlyContinue; throw "app not healthy after online update" }
+          if ((Get-FileHash C:\Aminos\saas.env).Hash -ne $before) { throw "saas.env changed" }
+          $pw = (Get-Content C:\Aminos\saas.env | Where-Object { $_ -like "AMINOS_ADMIN_PASSWORD=*" }).Split("=", 2)[1]
+          & C:\Aminos\venv\Scripts\python.exe C:\check_saas.py $pw
+          if ($LASTEXITCODE -ne 0) { throw "admin cannot sign in after online update" }

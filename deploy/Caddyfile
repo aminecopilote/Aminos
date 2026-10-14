@@ -1,0 +1,12 @@
+# DOMAIN=aminos.example.com  -> automatic Let's Encrypt certificate (DNS A record must point to this server)
+# DOMAIN=localhost (default) -> self-signed local certificate, for testing
+# Authentication is done by the application itself (accounts, lockout, audit); Caddy provides HTTPS and headers.
+{$DOMAIN:localhost} {
+	encode gzip
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+	}
+	reverse_proxy aminos:8501
+}
