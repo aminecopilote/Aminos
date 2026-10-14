@@ -42,11 +42,11 @@ else git clone -q --branch "${BRANCH}" "${REPO}" "${DIR}"; fi
 cd "${DIR}/deploy"
 
 if [ ! -f .env ]; then
-  echo "==> Credentials"
+  echo "==> Administrator account"
   PASSWORD="$(openssl rand -base64 18 | tr -d '/+=' | cut -c1-20)"
-  HASH="$(docker run --rm caddy:2 caddy hash-password --plaintext "${PASSWORD}")"
   umask 077
-  { echo "DOMAIN=${DOMAIN}"; echo "AMINOS_USER=aminos"; echo "AMINOS_PASSWORD_HASH='${HASH}'"; echo "ANTHROPIC_API_KEY="; } > .env
+  { echo "DOMAIN=${DOMAIN}"; echo "AMINOS_ADMIN_USER=admin"; echo "AMINOS_ADMIN_PASSWORD=${PASSWORD}"
+    echo "AMINOS_ALLOW_REMOTE_LLM=0"; echo "ANTHROPIC_API_KEY="; } > .env
   echo "${PASSWORD}" > "${DIR}/deploy/FIRST_PASSWORD.txt"   # shown once below; delete after saving it
 else
   echo "==> Keeping the existing .env (credentials unchanged)"
@@ -64,6 +64,6 @@ echo
 echo "Aminos is starting. Health: $(docker compose ps --format '{{.Service}}={{.Status}}' | tr '\n' ' ')"
 if [ "${DOMAIN}" = "localhost" ]; then echo "URL:   https://$(curl -fsS https://api.ipify.org 2>/dev/null || hostname -I | cut -d' ' -f1)  (self-signed certificate: the browser will warn)"
 else echo "URL:   https://${DOMAIN}   (the DNS A record must point to this server)"; fi
-echo "User:  aminos"
+echo "User:  admin   (then create the users of each firm in the Administration tab)"
 if [ -f FIRST_PASSWORD.txt ]; then echo "Pass:  $(cat FIRST_PASSWORD.txt)   <- save it, then: shred -u ${DIR}/deploy/FIRST_PASSWORD.txt"; fi
 [ "${LOCAL_LLM}" -eq 1 ] && echo "In the web UI choose the provider « ollama » and set --model to ${MODEL} (documents stay on this server)."

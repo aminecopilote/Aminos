@@ -61,9 +61,13 @@ jobs:
         with: { name: aminos-windows, path: dist/aminos-windows.zip }
 
   windows:
-    # Installs the bundle on a real Windows machine: scheduled tasks, Caddy with a password, uninstall.
+    # Installs the bundle on a real Windows machine (single-user with a shared password, and multi-user "saas" mode).
     needs: windows-bundle
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [single, saas]
     steps:
       - uses: actions/download-artifact@v4
         with: { name: aminos-windows }
@@ -72,9 +76,9 @@ jobs:
         run: |
           Expand-Archive aminos-windows.zip -DestinationPath bundle
           Set-Location bundle\aminos-windows
-          whoami /groups | Select-String "S-1-5-32-544"
-          .\install.ps1 -Dir C:\Aminos -Domain "http://localhost:8080" -NoService
-      - name: App healthy, password enforced, extras importable
+          $extra = if ("${{ matrix.mode }}" -eq "saas") { @("-Saas") } else { @() }
+          .\install.ps1 -Dir C:\Aminos -Domain "http://localhost:8080" -NoService @extra
+      - name: App healthy and extras importable
         shell: powershell
         run: |
           $ok = $false
@@ -89,19 +93,44 @@ jobs:
             Write-Host "--- listeners"; Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in 8501, 8080 } | Format-Table LocalAddress, LocalPort, OwningProcess
             throw "app not healthy"
           }
-          try { Invoke-WebRequest http://localhost:8080/ -UseBasicParsing | Out-Null; throw "no password asked" } catch { if ($_.Exception.Response.StatusCode.value__ -ne 401) { throw } }
-          $pw = (Get-Content C:\Aminos\FIRST_PASSWORD.txt).Trim()
-          $h = @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("aminos:$pw")) }
-          $r = Invoke-WebRequest http://localhost:8080/_stcore/health -Headers $h -UseBasicParsing
-          if ($r.Content -ne "ok") { throw "proxy with password failed" }
-          & C:\Aminos\venv\Scripts\python.exe -c "import aminos, agent_coordinator, pyhanko, cryptography, docx, streamlit; print('extras ok')"
+          & C:\Aminos\venv\Scripts\python.exe -c "import aminos, aminos.saas, agent_coordinator, pyhanko, cryptography, docx, streamlit; print('extras ok')"
           if ($LASTEXITCODE -ne 0) { throw "import failed" }
           & C:\Aminos\venv\Scripts\aminos.exe notary init -w C:\nw
           if ($LASTEXITCODE -ne 0) { throw "notary init failed" }
+      - name: Single-user mode asks for the shared password
+        if: matrix.mode == 'single'
+        shell: powershell
+        run: |
+          try { Invoke-WebRequest http://localhost:8080/ -UseBasicParsing | Out-Null; throw "no password asked" } catch { if ($_.Exception.Response.StatusCode.value__ -ne 401) { throw } }
+          $pw = (Get-Content C:\Aminos\FIRST_PASSWORD.txt).Trim()
+          $h = @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("aminos:$pw")) }
+          if ((Invoke-WebRequest http://localhost:8080/_stcore/health -Headers $h -UseBasicParsing).Content -ne "ok") { throw "proxy with password failed" }
+      - name: Multi-user mode - app reachable, administrator can sign in, wrong password cannot
+        if: matrix.mode == 'saas'
+        shell: powershell
+        run: |
+          if ((Invoke-WebRequest http://localhost:8080/_stcore/health -UseBasicParsing).Content -ne "ok") { throw "not reachable through Caddy" }
+          if (-not (Test-Path C:\Aminos\saas.env)) { throw "saas.env missing" }
+          $pw = (Get-Content C:\Aminos\FIRST_PASSWORD.txt).Trim()
+          $code = @'
+          import sys
+          from aminos.saas import AuthError, SaaSStore
+          s = SaaSStore(r"C:\Aminos\data\saas")
+          s.bootstrap_admin("admin", sys.argv[1])
+          assert s.authenticate("admin", sys.argv[1]).is_admin
+          try:
+              s.authenticate("admin", "wrong-password-xx"); raise SystemExit("wrong password accepted")
+          except AuthError:
+              print("saas auth ok on Windows")
+          '@
+          Set-Content -Path C:\check_saas.py -Value $code
+          & C:\Aminos\venv\Scripts\python.exe C:\check_saas.py $pw
+          if ($LASTEXITCODE -ne 0) { throw "saas check failed" }
       - name: Uninstall removes files and processes, keeps data
         shell: powershell
         run: |
           C:\Aminos\uninstall.ps1 -Dir C:\Aminos
           if (Get-ScheduledTask -TaskName Aminos* -ErrorAction SilentlyContinue) { throw "tasks remain" }
           if (Test-Path C:\Aminos\venv) { throw "venv remains" }
+          if (Test-Path C:\Aminos\saas.env) { throw "secrets file remains" }
           if (-not (Test-Path C:\Aminos\data)) { throw "data was deleted" }

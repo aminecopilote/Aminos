@@ -7,6 +7,7 @@ foreach ($t in "Aminos", "Aminos-Caddy") {
 Get-Process caddy, streamlit, python, powershell -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Dir*" -and $_.Id -ne $PID } | Stop-Process -Force
 Get-NetFirewallRule -DisplayName "Aminos HTTP/S *" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 foreach ($d in "venv", "app", "caddy", "logs") { Remove-Item "$Dir\$d" -Recurse -Force -ErrorAction SilentlyContinue }
-Remove-Item "$Dir\FIRST_PASSWORD.txt" -Force -ErrorAction SilentlyContinue
+Remove-Item "$Dir\FIRST_PASSWORD.txt", "$Dir\saas.env", "$Dir\Lancer-Aminos.bat" -Force -ErrorAction SilentlyContinue
+Remove-Item "C:\Users\Public\Desktop\Aminos.lnk", "$([Environment]::GetFolderPath('Desktop'))\Aminos.lnk" -Force -ErrorAction SilentlyContinue
 if ($DeleteData) { Remove-Item "$Dir\data" -Recurse -Force -ErrorAction SilentlyContinue }
 Write-Host "Aminos removed. Data kept in $Dir\data" -ForegroundColor Green

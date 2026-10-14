@@ -3,6 +3,7 @@
            (-NoService: no admin needed, but nothing starts at boot and no firewall rule is created).
 .EXAMPLE   .\install.ps1                                  # local only: http://127.0.0.1:8501 (use RDP or an SSH tunnel)
 .EXAMPLE   .\install.ps1 -Domain aminos.example.com       # public HTTPS + password through Caddy (DNS A record -> this server)
+.EXAMPLE   .\install.ps1 -Saas -Domain aminos.example.com  # multi-user service: accounts + HTTPS
 .EXAMPLE   .\install.ps1 -Domain http://localhost:8080    # Caddy over plain HTTP, for tests
 #>
 param(
@@ -10,7 +11,8 @@ param(
     [int]$Port = 8501,
     [string]$Domain = "",
     [string]$CaddyVersion = "2.8.4",
-    [switch]$NoService
+    [switch]$NoService,
+    [switch]$Saas          # multi-user mode: accounts, one data folder per firm, quotas, audit log (first admin created at install)
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -62,12 +64,24 @@ if ($LASTEXITCODE -ne 0) { throw "dependency installation failed" }
 $whl = Get-ChildItem "$Bundle\wheelhouse\*" -Include "aminos-*.whl", "agent_coordinator-*.whl" | ForEach-Object { $_.FullName }
 & $pip -m pip install --quiet --no-index --no-deps $whl
 if ($LASTEXITCODE -ne 0) { throw "Aminos installation failed" }
-Copy-Item "$Bundle\app.py" "$Dir\app\app.py" -Force
-Copy-Item "$Bundle\run-app.ps1" "$Dir\run-app.ps1" -Force
+Copy-Item "$Bundle\app.py", "$Bundle\saas_app.py" "$Dir\app\" -Force
+Copy-Item "$Bundle\run-app.ps1", "$Bundle\Lancer-Aminos.bat" "$Dir\" -Force
 Copy-Item "$Bundle\uninstall.ps1" "$Dir\uninstall.ps1" -Force
 
 # --- optional public access: Caddy (HTTPS + password) ----------------------------------------------------------
 $password = $null
+function New-StrongPassword { -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 20 | ForEach-Object { [char]$_ }) }
+function Protect-File($path) {
+    icacls $path /inheritance:r /grant:r "Administrators:F" "SYSTEM:F" "${env:USERDOMAIN}\${env:USERNAME}:F" | Out-Null
+}
+if ($Saas) {
+    $password = New-StrongPassword
+    @("AMINOS_ADMIN_USER=admin", "AMINOS_ADMIN_PASSWORD=$password", "AMINOS_DATA_DIR=$Dir\data\saas", "AMINOS_ALLOW_REMOTE_LLM=0") |
+        Set-Content -Encoding ASCII "$Dir\saas.env"
+    Protect-File "$Dir\saas.env"
+    Set-Content -Encoding ASCII "$Dir\FIRST_PASSWORD.txt" $password
+    Protect-File "$Dir\FIRST_PASSWORD.txt"
+}
 if ($Domain) {
     Write-Host "==> Caddy $CaddyVersion"
     New-Item -ItemType Directory -Force -Path "$Dir\caddy" | Out-Null
@@ -79,18 +93,17 @@ if ($Domain) {
     $alg = switch ($expected.Length) { 64 { "SHA256" } 128 { "SHA512" } default { throw "Unrecognised checksum format in Caddy release" } }
     if ((Get-FileHash -Algorithm $alg "$Dir\caddy\$zipName").Hash.ToLower() -ne $expected.ToLower()) { throw "Caddy download checksum mismatch" }
     Expand-Archive "$Dir\caddy\$zipName" -DestinationPath "$Dir\caddy" -Force
-    $password = -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 20 | ForEach-Object { [char]$_ })
-    $hash = (& "$Dir\caddy\caddy.exe" hash-password --plaintext $password).Trim()
-    @"
-$Domain {
-	basic_auth {
-		aminos $hash
-	}
-	reverse_proxy 127.0.0.1:$Port
-}
-"@ | Set-Content -Encoding ASCII "$Dir\caddy\Caddyfile"
-    Set-Content -Encoding ASCII "$Dir\FIRST_PASSWORD.txt" $password
-    icacls "$Dir\FIRST_PASSWORD.txt" /inheritance:r /grant:r "Administrators:F" "SYSTEM:F" "${env:USERDOMAIN}\${env:USERNAME}:F" | Out-Null
+    if ($Saas) {
+        # the application authenticates users itself; Caddy only provides HTTPS
+        $auth = ""
+    } else {
+        $password = New-StrongPassword
+        $hash = (& "$Dir\caddy\caddy.exe" hash-password --plaintext $password).Trim()
+        $auth = "`tbasic_auth {`n`t`taminos $hash`n`t}`n"
+        Set-Content -Encoding ASCII "$Dir\FIRST_PASSWORD.txt" $password
+        Protect-File "$Dir\FIRST_PASSWORD.txt"
+    }
+    "$Domain {`n$auth`treverse_proxy 127.0.0.1:$Port`n}`n" | Set-Content -Encoding ASCII "$Dir\caddy\Caddyfile"
     if ($admin -and $Domain -notmatch "^http://") {
         foreach ($p in 80, 443) { New-NetFirewallRule -DisplayName "Aminos HTTP/S $p" -Direction Inbound -Protocol TCP -LocalPort $p -Action Allow -ErrorAction SilentlyContinue | Out-Null }
     }
@@ -105,7 +118,7 @@ function Register-AminosTask($name, $exe, $argLine) {
     Register-ScheduledTask -TaskName $name -Action $action -Trigger $trigger -Settings $settings -User "SYSTEM" -RunLevel Highest | Out-Null
     Start-ScheduledTask -TaskName $name
 }
-$appArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$Dir\run-app.ps1`" -Dir `"$Dir`" -Port $Port"
+$appArgs = "-NoProfile -ExecutionPolicy Bypass -File `"$Dir\run-app.ps1`" -Dir `"$Dir`" -Port $Port$(if ($Saas) { ' -Saas' })"
 if ($NoService) {
     Start-Process powershell.exe -ArgumentList $appArgs -WindowStyle Hidden
     if ($Domain) { Start-Process "$Dir\caddy\caddy.exe" -ArgumentList "run --config `"$Dir\caddy\Caddyfile`" --adapter caddyfile" -WindowStyle Hidden }
@@ -114,12 +127,22 @@ if ($NoService) {
     if ($Domain) { Register-AminosTask "Aminos-Caddy" "$Dir\caddy\caddy.exe" "run --config `"$Dir\caddy\Caddyfile`" --adapter caddyfile" }
 }
 
+try {
+    $desktop = if ($admin) { "C:\Users\Public\Desktop" } else { [Environment]::GetFolderPath("Desktop") }
+    $lnk = (New-Object -ComObject WScript.Shell).CreateShortcut("$desktop\Aminos.lnk")
+    $lnk.TargetPath = "$Dir\Lancer-Aminos.bat"; $lnk.Arguments = "$Port"; $lnk.WorkingDirectory = $Dir; $lnk.Save()
+} catch { Write-Host "Desktop shortcut not created: $_" }
+
 Write-Host ""
 Write-Host "Aminos is starting (first start takes ~20 s)."
 if ($Domain) {
     Write-Host "URL:   $(if ($Domain -match '^http') { $Domain } else { "https://$Domain" })"
-    Write-Host "User:  aminos"
+    Write-Host "User:  $(if ($Saas) { 'admin   (then create each firm''s users in the Administration tab)' } else { 'aminos' })"
     Write-Host "Pass:  $password   <- save it, then delete $Dir\FIRST_PASSWORD.txt"
+} elseif ($Saas) {
+    Write-Host "URL:   http://127.0.0.1:$Port  (local only; add -Domain for public HTTPS)"
+    Write-Host "User:  admin"
+    Write-Host "Pass:  $password   <- save it, then delete $Dir\FIRST_PASSWORD.txt and $Dir\saas.env after noting it"
 } else {
     Write-Host "URL:   http://127.0.0.1:$Port  (local only: open it from this server, or tunnel: ssh -L ${Port}:127.0.0.1:${Port} user@server)"
 }

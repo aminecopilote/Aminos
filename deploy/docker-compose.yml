@@ -5,6 +5,9 @@ services:
     restart: unless-stopped
     environment:
       OLLAMA_BASE_URL: http://ollama:11434/v1
+      AMINOS_ADMIN_USER: ${AMINOS_ADMIN_USER:?run install.sh first}
+      AMINOS_ADMIN_PASSWORD: ${AMINOS_ADMIN_PASSWORD:?run install.sh first}
+      AMINOS_ALLOW_REMOTE_LLM: ${AMINOS_ALLOW_REMOTE_LLM:-0}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes: [aminos-data:/data]
     expose: ["8501"]            # reachable only through Caddy, never published on the host
@@ -14,8 +17,6 @@ services:
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN:-localhost}
-      AMINOS_USER: ${AMINOS_USER:?run install.sh first}
-      AMINOS_PASSWORD_HASH: ${AMINOS_PASSWORD_HASH:?run install.sh first}
     ports: ["80:80", "443:443"]
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
