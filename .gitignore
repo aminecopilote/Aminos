@@ -9,3 +9,4 @@ deploy/FIRST_PASSWORD.txt
 deploy/.env
 dist/
 build/
+agency/data/

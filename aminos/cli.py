@@ -144,6 +144,77 @@ def _cmd_notary(a) -> int:
     return 0 if r["ok"] else 1
 
 
+def _cmd_skills(a) -> int:
+    import os
+    import shutil
+    import tempfile
+    from . import skills as sk
+    mgr = sk.SkillManager(a.dest or os.environ.get("AMINOS_SKILLS_DIR", "skills-installed"))
+    try:
+        if a.action == "list":
+            for key, m in sorted(mgr.installed().items()):
+                print(f"{key}\t{m['commit'][:10]}\t{'avec scripts' if m['with_scripts'] else 'texte seul'}")
+        elif a.action == "available":
+            for s in mgr.available(a.target):
+                print(f"{s.name}\t{s.description[:100]}")
+        elif a.action == "install":
+            for key, skipped in mgr.install(a.target, a.names, a.with_scripts, a.ref):
+                print(f"installé : {key} ({mgr.installed()[key]['commit'][:10]})")
+                for s in skipped:
+                    print(f"  ignoré : {s}")
+            print("Relisez les fichiers installés avant de les utiliser : ces skills ne sont pas audités.")
+        elif a.action == "verify":
+            problems = mgr.verify()
+            print("\n".join(problems) or "RAS : fichiers conformes à l'installation")
+            return 1 if problems else 0
+        elif a.action == "update":
+            keys = [a.target] if a.target else sorted(mgr.installed())
+            for key in keys:
+                plan = mgr.update(key, apply=a.yes, force=a.force)
+                state = "à jour" if plan.empty else ("mis à jour" if a.yes else "mise à jour disponible (relancez avec --yes)")
+                print(f"{key} : {state} {plan.old_commit[:10]} -> {plan.new_commit[:10]}")
+                for label, items in (("ajoutés", plan.added), ("modifiés", plan.changed), ("supprimés", plan.removed),
+                                     ("modifiés localement", plan.locally_modified)):
+                    if items:
+                        print(f"  {label} : {', '.join(items)}")
+        elif a.action == "remove":
+            mgr.remove(a.target)
+            print(f"supprimé : {a.target}")
+        elif a.action == "search":
+            src = sk.SOURCES["awesome-agent-skills"]
+            tmp = tempfile.mkdtemp()
+            try:
+                sk.fetch(src["url"], __import__("pathlib").Path(tmp) / "r", src["ref"])
+                readme = (__import__("pathlib").Path(tmp) / "r" / "README.md").read_text(encoding="utf-8")
+            finally:
+                shutil.rmtree(tmp, ignore_errors=True)
+            for h in sk.search_index(readme, a.target):
+                tag = "installable" if h["installable"] else "page web (installation manuelle)"
+                print(f"{h['name']}\t{tag}\t{h['url']}\n    {h['description'][:110]}")
+    except sk.SkillError as e:
+        print(f"erreur : {e}", file=sys.stderr)
+        return 2
+    return 0
+
+
+def _cmd_orchestrate(a) -> int:
+    from . import orchestrator as orch
+    run = orch.subprocess_runner(cwd=a.repo)
+    logdir = Path(a.logdir) if a.logdir else orch.default_logdir()
+    if a.once:
+        print(json.dumps(orch.run_cycle(run, logdir, a.interval, a.execute, a.repo), ensure_ascii=False, indent=2))
+        return 0
+    orch.loop(run, logdir, a.interval, a.execute)
+    return 0
+
+
+def _cmd_colab_plan(a) -> int:
+    from . import colab
+    p = colab.plan()
+    print(json.dumps(colab.as_dict(p), ensure_ascii=False, indent=2))
+    return 0 if p.gpu != "none" else 1
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="aminos")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -197,6 +268,27 @@ def main(argv=None) -> int:
     np_.add_argument("action", choices=["init", "seal", "verify", "ledger"]); np_.add_argument("file", nargs="?")
     np_.add_argument("-w", "--workdir", default="notary-work"); np_.add_argument("--label", default="")
     np_.set_defaults(fn=_cmd_notary)
+
+    sp = sub.add_parser("skills", help="installer / vérifier / mettre à jour des skills (SKILL.md) tiers, versions épinglées")
+    sp.add_argument("action", choices=["list", "available", "install", "verify", "update", "remove", "search"])
+    sp.add_argument("target", nargs="?", default="", help="source (chatgpt-skills, owner/repo, URL GitHub /tree/...), skill, ou mot-clé")
+    sp.add_argument("names", nargs="*", help="install : noms des skills")
+    sp.add_argument("--dest", help="dossier d'installation (défaut : $AMINOS_SKILLS_DIR ou ./skills-installed)")
+    sp.add_argument("--with-scripts", action="store_true", help="copier aussi les scripts (.py .ps1 .sh...) APRÈS les avoir relus")
+    sp.add_argument("--ref", help="commit ou branche précis")
+    sp.add_argument("--yes", action="store_true", help="update : appliquer"); sp.add_argument("--force", action="store_true")
+    sp.set_defaults(fn=_cmd_skills)
+
+    op = sub.add_parser("orchestrate", help="Orchestrateur Central : supervision de la machine (cycle JSON + journal)")
+    op.add_argument("--once", action="store_true", help="un seul cycle, enregistrement JSON complet sur la sortie")
+    op.add_argument("--interval", type=int, default=300, help="secondes entre deux cycles (défaut 300)")
+    op.add_argument("--logdir", help=r"défaut : C:\orchestrator\logs sous Windows, ./orchestrator-logs ailleurs")
+    op.add_argument("--execute", action="store_true", help="exécuter les actions de la liste blanche (sinon simple proposition)")
+    op.add_argument("--repo", default=".", help="dépôt Git à surveiller")
+    op.set_defaults(fn=_cmd_orchestrate)
+
+    cp2 = sub.add_parser("colab-plan", help="GPU détecté et modèle local adapté (utilisé par le carnet Google Colab)")
+    cp2.set_defaults(fn=_cmd_colab_plan)
 
     a = ap.parse_args(argv)
     return a.fn(a)

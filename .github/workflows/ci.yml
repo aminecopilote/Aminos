@@ -67,8 +67,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [single, saas]
+        mode: [single, saas, full]
     steps:
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
       - uses: actions/download-artifact@v4
         with: { name: aminos-windows }
       - name: Install per user (Windows PowerShell 5.1; the runner is not elevated, so no boot task; Caddy over HTTP)
@@ -77,7 +79,11 @@ jobs:
           Expand-Archive aminos-windows.zip -DestinationPath bundle
           Set-Location bundle\aminos-windows
           $extra = @{}   # a hashtable splats as named parameters; an array would pass "-Saas" as a positional value
-          if ("${{ matrix.mode }}" -eq "saas") { $extra["Saas"] = $true }
+          if ("${{ matrix.mode }}" -ne "single") { $extra["Saas"] = $true }
+          if ("${{ matrix.mode }}" -eq "full") {
+            $extra["Orchestrator"] = $true; $extra["Agency"] = $true
+            $extra["Skills"] = @("chatgpt-skills:document-converter-suite")
+          }
           .\install.ps1 -Dir C:\Aminos -Domain "http://localhost:8080" -NoService @extra
       - name: App healthy and extras importable
         shell: powershell
@@ -107,7 +113,7 @@ jobs:
           $h = @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("aminos:$pw")) }
           if ((Invoke-WebRequest http://localhost:8080/_stcore/health -Headers $h -UseBasicParsing).Content -ne "ok") { throw "proxy with password failed" }
       - name: Multi-user mode - app reachable, administrator can sign in, wrong password cannot
-        if: matrix.mode == 'saas'
+        if: matrix.mode != 'single'
         shell: powershell
         run: |
           if ((Invoke-WebRequest http://localhost:8080/_stcore/health -UseBasicParsing).Content -ne "ok") { throw "not reachable through Caddy" }
@@ -127,6 +133,61 @@ jobs:
           Set-Content -Path C:\check_saas.py -Value $code
           & C:\Aminos\venv\Scripts\python.exe C:\check_saas.py $pw
           if ($LASTEXITCODE -ne 0) { throw "saas check failed" }
+      - name: Orchestrator collectors work on real Windows (full mode)
+        if: matrix.mode == 'full'
+        shell: powershell
+        run: |
+          $log = $null
+          foreach ($i in 1..40) {
+            $log = Get-ChildItem C:\orchestrator\logs\orch-*.jsonl -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($log) { break }; Start-Sleep 3
+          }
+          if (-not $log) { Get-Content C:\Aminos\logs\orchestrator.log -ErrorAction SilentlyContinue; throw "no orchestrator cycle logged" }
+          $rec = (Get-Content $log.FullName -TotalCount 1) | ConvertFrom-Json
+          foreach ($k in "timestamp","cycle_id","observations","analysis","decision","actions","next_check_seconds") { if (-not ($rec.PSObject.Properties.Name -contains $k)) { throw "missing key $k" } }
+          $o = $rec.observations
+          Write-Host "decision: $($rec.decision) | analysis: $($rec.analysis)"
+          foreach ($k in "cpu_top","mem","counters","net_listen") {
+            if ($o.$k.error) { throw "collector $k failed on Windows: $($o.$k.error)" }
+            if (-not $o.$k) { throw "collector $k returned nothing" }
+          }
+          if ($rec.alerts -match "indisponibles") { throw "orchestrator could not measure CPU/memory on Windows" }
+      - name: agent-hq runs, bound to loopback only (full mode)
+        if: matrix.mode == 'full'
+        shell: powershell
+        run: |
+          $ok = $false
+          foreach ($i in 1..40) { try { if ((Invoke-WebRequest http://127.0.0.1:7700/api/health -UseBasicParsing).Content -match '"ok":true') { $ok = $true; break } } catch { }; Start-Sleep 3 }
+          if (-not $ok) { Get-Content C:\Aminos\logs\agent-hq.log -ErrorAction SilentlyContinue; throw "agent-hq not healthy" }
+          $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notmatch "^127\." -and $_.PrefixOrigin -ne "WellKnown" } | Select-Object -First 1).IPAddress
+          Write-Host "testing the non-loopback address $ip"
+          $reached = $false
+          try { Invoke-WebRequest "http://${ip}:7700/api/health" -UseBasicParsing -TimeoutSec 5 | Out-Null; $reached = $true } catch { }
+          if ($reached) { throw "agent-hq is reachable on $ip : it must listen on 127.0.0.1 only (it has no authentication)" }
+      - name: Skills installed (text only, pinned) and our own skill present (full mode)
+        if: matrix.mode == 'full'
+        shell: powershell
+        run: |
+          if (-not (Test-Path C:\Aminos\skills\chatgpt-skills\document-converter-suite\SKILL.md)) { throw "third-party skill missing" }
+          if (Test-Path C:\Aminos\skills\chatgpt-skills\document-converter-suite\scripts) { throw "scripts were copied without --with-scripts" }
+          if (-not (Test-Path C:\Aminos\skills\aminos\orchestrateur-central\SKILL.md)) { throw "own skill missing" }
+          if (-not (Test-Path C:\Aminos\agency\agent-coordinator\pyproject.toml)) { throw "agent-coordinator copy missing" }
+          & C:\Aminos\venv\Scripts\aminos.exe skills verify --dest C:\Aminos\skills
+          if ($LASTEXITCODE -ne 0) { throw "skills verify failed" }
+      - name: Update keeps data and passwords and restarts what was installed
+        if: matrix.mode != 'single'
+        shell: powershell
+        run: |
+          $before = (Get-FileHash C:\Aminos\saas.env).Hash
+          Set-Location bundle\aminos-windows
+          .\update.ps1 -Dir C:\Aminos -NoService
+          $ok = $false
+          foreach ($i in 1..40) { try { if ((Invoke-WebRequest http://127.0.0.1:8501/_stcore/health -UseBasicParsing).Content -eq "ok") { $ok = $true; break } } catch { }; Start-Sleep 3 }
+          if (-not $ok) { Get-Content C:\Aminos\logs\app.log -ErrorAction SilentlyContinue; throw "app not healthy after update" }
+          if ((Get-FileHash C:\Aminos\saas.env).Hash -ne $before) { throw "saas.env changed during update" }
+          $pw = (Get-Content C:\Aminos\saas.env | Where-Object { $_ -like "AMINOS_ADMIN_PASSWORD=*" }).Split("=", 2)[1]
+          & C:\Aminos\venv\Scripts\python.exe C:\check_saas.py $pw
+          if ($LASTEXITCODE -ne 0) { throw "admin cannot sign in after update" }
       - name: Uninstall removes files and processes, keeps data
         shell: powershell
         run: |
