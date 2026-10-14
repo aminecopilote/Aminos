@@ -1,5 +1,6 @@
 <#
-.SYNOPSIS  Installs Aminos on Windows (10/11, Server 2019+), no Docker. Run from the unzipped bundle, as Administrator.
+.SYNOPSIS  Installs Aminos on Windows (10/11, Server 2019+), no Docker. Run from the unzipped bundle, as Administrator
+           (-NoService: no admin needed, but nothing starts at boot and no firewall rule is created).
 .EXAMPLE   .\install.ps1                                  # local only: http://127.0.0.1:8501 (use RDP or an SSH tunnel)
 .EXAMPLE   .\install.ps1 -Domain aminos.example.com       # public HTTPS + password through Caddy (DNS A record -> this server)
 .EXAMPLE   .\install.ps1 -Domain http://localhost:8080    # Caddy over plain HTTP, for tests
@@ -16,7 +17,7 @@ $ProgressPreference = "SilentlyContinue"
 $Bundle = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole("Administrator")
-if (-not $admin) { throw "Run PowerShell as Administrator." }
+if (-not $admin -and -not $NoService) { throw "Run PowerShell as Administrator (or add -NoService for a per-user install without boot task or firewall rule)." }
 if (-not (Test-Path "$Bundle\wheelhouse")) { throw "wheelhouse\ not found: run this script from the unzipped bundle." }
 
 # --- integrity of the offline wheelhouse -----------------------------------------------------------------------
@@ -43,7 +44,7 @@ if (-not $py) {
     Write-Host "==> Installing Python 3.12 (python.org)"
     $installer = Join-Path $env:TEMP "python-3.12.10-amd64.exe"
     Invoke-WebRequest "https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe" -OutFile $installer
-    Start-Process $installer -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1 Include_test=0" -Wait
+    Start-Process $installer -ArgumentList "/quiet InstallAllUsers=$(if ($admin) { 1 } else { 0 }) PrependPath=1 Include_test=0" -Wait
     $env:Path = [Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [Environment]::GetEnvironmentVariable("Path", "User")
     $py = Find-Python
     if (-not $py) { throw "Python 3.12 installation failed." }
@@ -89,8 +90,8 @@ $Domain {
 }
 "@ | Set-Content -Encoding ASCII "$Dir\caddy\Caddyfile"
     Set-Content -Encoding ASCII "$Dir\FIRST_PASSWORD.txt" $password
-    icacls "$Dir\FIRST_PASSWORD.txt" /inheritance:r /grant:r "Administrators:F" "SYSTEM:F" | Out-Null
-    if ($Domain -notmatch "^http://") {
+    icacls "$Dir\FIRST_PASSWORD.txt" /inheritance:r /grant:r "Administrators:F" "SYSTEM:F" "${env:USERDOMAIN}\${env:USERNAME}:F" | Out-Null
+    if ($admin -and $Domain -notmatch "^http://") {
         foreach ($p in 80, 443) { New-NetFirewallRule -DisplayName "Aminos HTTP/S $p" -Direction Inbound -Protocol TCP -LocalPort $p -Action Allow -ErrorAction SilentlyContinue | Out-Null }
     }
 }

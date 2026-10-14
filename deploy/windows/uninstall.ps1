@@ -4,7 +4,7 @@ foreach ($t in "Aminos", "Aminos-Caddy") {
     Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue
 }
-Get-Process caddy, streamlit -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Dir*" } | Stop-Process -Force
+Get-Process caddy, streamlit, python, powershell -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$Dir*" -and $_.Id -ne $PID } | Stop-Process -Force
 Get-NetFirewallRule -DisplayName "Aminos HTTP/S *" -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 foreach ($d in "venv", "app", "caddy", "logs") { Remove-Item "$Dir\$d" -Recurse -Force -ErrorAction SilentlyContinue }
 Remove-Item "$Dir\FIRST_PASSWORD.txt" -Force -ErrorAction SilentlyContinue

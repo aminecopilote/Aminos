@@ -67,12 +67,13 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with: { name: aminos-windows }
-      - name: Install (Windows PowerShell 5.1, Caddy over HTTP for the test)
+      - name: Install per user (Windows PowerShell 5.1; the runner is not elevated, so no boot task; Caddy over HTTP)
         shell: powershell
         run: |
           Expand-Archive aminos-windows.zip -DestinationPath bundle
           Set-Location bundle\aminos-windows
-          .\install.ps1 -Dir C:\Aminos -Domain "http://localhost:8080"
+          whoami /groups | Select-String "S-1-5-32-544"
+          .\install.ps1 -Dir C:\Aminos -Domain "http://localhost:8080" -NoService
       - name: App healthy, password enforced, extras importable
         shell: powershell
         run: |
@@ -91,7 +92,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "import failed" }
           & C:\Aminos\venv\Scripts\aminos.exe notary init -w C:\nw
           if ($LASTEXITCODE -ne 0) { throw "notary init failed" }
-      - name: Uninstall removes tasks and files, keeps data
+      - name: Uninstall removes files and processes, keeps data
         shell: powershell
         run: |
           C:\Aminos\uninstall.ps1 -Dir C:\Aminos
