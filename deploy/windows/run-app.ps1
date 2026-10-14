@@ -14,6 +14,9 @@ try {
     $streamlit = "$Dir\venv\Scripts\streamlit.exe"
     if (-not (Test-Path $streamlit)) { throw "missing $streamlit" }
     Log "launching $streamlit on 127.0.0.1:$Port"
+    # Streamlit prints its start-up banner on stderr; with "Stop" PowerShell would turn that into a fatal error
+    # and kill the app one second after it started.
+    $ErrorActionPreference = "Continue"
     & $streamlit run "$Dir\app\$script" --server.address=127.0.0.1 --server.port=$Port `
         --server.headless=true --browser.gatherUsageStats=false --server.maxUploadSize=50 2>&1 |
         ForEach-Object { Add-Content -Path $log -Value "$_" }

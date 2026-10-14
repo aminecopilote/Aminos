@@ -39,7 +39,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Compose file is valid
-        run: AMINOS_USER=x AMINOS_PASSWORD_HASH=x docker compose -f deploy/docker-compose.yml config --quiet
+        run: AMINOS_ADMIN_USER=x AMINOS_ADMIN_PASSWORD=x docker compose -f deploy/docker-compose.yml config --quiet
       - name: Build image
         run: docker build -f deploy/Dockerfile -t aminos:ci .
       - name: App starts and is healthy; OCR languages and optional extras are present
