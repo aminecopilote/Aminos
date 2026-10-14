@@ -82,7 +82,13 @@ jobs:
             try { if ((Invoke-WebRequest http://127.0.0.1:8501/_stcore/health -UseBasicParsing).Content -eq "ok") { $ok = $true; break } } catch { }
             Start-Sleep 3
           }
-          if (-not $ok) { Get-Content C:\Aminos\logs\app.log -ErrorAction SilentlyContinue; Get-ScheduledTask Aminos* | Format-Table; throw "app not healthy" }
+          if (-not $ok) {
+            Write-Host "--- logs dir"; Get-ChildItem C:\Aminos\logs -ErrorAction SilentlyContinue | Format-Table Name, Length
+            Write-Host "--- app.log"; Get-Content C:\Aminos\logs\app.log -ErrorAction SilentlyContinue
+            Write-Host "--- processes"; Get-Process | Where-Object { $_.Name -match "streamlit|python|powershell|caddy" } | Format-Table Id, Name, Path
+            Write-Host "--- listeners"; Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $_.LocalPort -in 8501, 8080 } | Format-Table LocalAddress, LocalPort, OwningProcess
+            throw "app not healthy"
+          }
           try { Invoke-WebRequest http://localhost:8080/ -UseBasicParsing | Out-Null; throw "no password asked" } catch { if ($_.Exception.Response.StatusCode.value__ -ne 401) { throw } }
           $pw = (Get-Content C:\Aminos\FIRST_PASSWORD.txt).Trim()
           $h = @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("aminos:$pw")) }
