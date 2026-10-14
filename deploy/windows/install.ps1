@@ -17,8 +17,13 @@ param(
     [switch]$Orchestrator,  # supervision loop "Orchestrateur Central" (task Aminos-Orchestrator, logs in C:\orchestrator\logs)
     [switch]$Agency,        # local copies of agent-hq and agent-coordinator (chef d'agence); agent-hq needs Node 22
     [string[]]$Skills = @(),# third-party skills, "source:skill" (see: aminos skills available chatgpt-skills)
-    [switch]$Update         # reuse the options recorded by the previous install
+    [switch]$Update,        # reuse the options recorded by the previous install
+    [switch]$Online,        # set by bootstrap.ps1: no wheelhouse, dependencies come from PyPI
+    [string]$SourceDir = "",# online: extracted Aminos source to install
+    [string]$Repo = "",     # online: recorded for updates
+    [string]$Ref = ""       # online: recorded for updates
 )
+$AgentCoordinatorSha = "4d2560d2e53d2d066328ed4a0250376efe44aa2a"   # the commit that was tested
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 $Bundle = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -26,7 +31,7 @@ $StateFile = "$Dir\install.json"
 
 $admin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole("Administrator")
 if (-not $admin -and -not $NoService) { throw "Run PowerShell as Administrator (or add -NoService for a per-user install without boot task or firewall rule)." }
-if (-not (Test-Path "$Bundle\wheelhouse")) { throw "wheelhouse\ not found: run this script from the unzipped bundle." }
+if (-not $Online -and -not (Test-Path "$Bundle\wheelhouse")) { throw "wheelhouse\ not found: run this script from the unzipped bundle (or use bootstrap.ps1 to install online)." }
 
 # --- an update re-applies the options of the previous install --------------------------------------------------
 if ($Update) {
@@ -41,11 +46,13 @@ if ($Update) {
 }
 
 # --- integrity of everything shipped in the bundle -------------------------------------------------------------
-Write-Host "==> Checking bundle checksums"
-foreach ($line in Get-Content "$Bundle\SHA256SUMS.txt") {
-    $hash, $name = $line -split "\s+\*?", 2
-    $actual = (Get-FileHash -Algorithm SHA256 "$Bundle\$name").Hash.ToLower()
-    if ($actual -ne $hash.ToLower()) { throw "Checksum mismatch: $name" }
+if (-not $Online) {
+    Write-Host "==> Checking bundle checksums"
+    foreach ($line in Get-Content "$Bundle\SHA256SUMS.txt") {
+        $hash, $name = $line -split "\s+\*?", 2
+        $actual = (Get-FileHash -Algorithm SHA256 "$Bundle\$name").Hash.ToLower()
+        if ($actual -ne $hash.ToLower()) { throw "Checksum mismatch: $name" }
+    }
 }
 
 # --- stop what is running from $Dir (Windows cannot replace files that are in use) -----------------------------
@@ -90,14 +97,22 @@ if (-not (Test-Path "$Dir\venv\Scripts\python.exe")) {
     if ($LASTEXITCODE -ne 0) { throw "venv creation failed" }
 }
 $pip = "$Dir\venv\Scripts\python.exe"
-& $pip -m pip install --quiet --no-index --find-links "$Bundle\wheelhouse" -r "$Bundle\requirements.txt"
-if ($LASTEXITCODE -ne 0) { throw "dependency installation failed" }
-$whl = Get-ChildItem "$Bundle\wheelhouse\*" -Include "aminos-*.whl", "agent_coordinator-*.whl" | ForEach-Object { $_.FullName }
-& $pip -m pip install --quiet --no-index --no-deps --force-reinstall $whl   # same version number, new content: force
-if ($LASTEXITCODE -ne 0) { throw "Aminos installation failed" }
+if ($Online) {
+    & $pip -m pip install --quiet -r "$Bundle\requirements.txt"
+    if ($LASTEXITCODE -ne 0) { throw "dependency installation failed" }
+    & $pip -m pip install --quiet --no-deps --force-reinstall $SourceDir "https://github.com/SuperInstance/agent-coordinator/archive/$AgentCoordinatorSha.zip"
+    if ($LASTEXITCODE -ne 0) { throw "Aminos installation failed" }
+} else {
+    & $pip -m pip install --quiet --no-index --find-links "$Bundle\wheelhouse" -r "$Bundle\requirements.txt"
+    if ($LASTEXITCODE -ne 0) { throw "dependency installation failed" }
+    $whl = Get-ChildItem "$Bundle\wheelhouse\*" -Include "aminos-*.whl", "agent_coordinator-*.whl" | ForEach-Object { $_.FullName }
+    & $pip -m pip install --quiet --no-index --no-deps --force-reinstall $whl   # same version number, new content: force
+    if ($LASTEXITCODE -ne 0) { throw "Aminos installation failed" }
+}
 Copy-Item "$Bundle\app.py", "$Bundle\saas_app.py" "$Dir\app\" -Force
 Copy-Item "$Bundle\run-app.ps1", "$Bundle\run-orchestrator.ps1", "$Bundle\run-agent-hq.ps1", "$Bundle\Lancer-Aminos.bat",
           "$Bundle\uninstall.ps1", "$Bundle\update.ps1" "$Dir\" -Force
+if (Test-Path "$Bundle\bootstrap.ps1") { Copy-Item "$Bundle\bootstrap.ps1" "$Dir\" -Force }
 # our own skills (the third-party ones live next to them, managed by `aminos skills`)
 New-Item -ItemType Directory -Force -Path "$Dir\skills\aminos" | Out-Null
 Copy-Item "$Bundle\skills\*" "$Dir\skills\aminos\" -Recurse -Force
@@ -193,7 +208,8 @@ if ($Agency -and $nodeOk) { Start-Component "Aminos-AgentHQ" $ps (& $psArgs "run
 
 # --- remember the options for -Update --------------------------------------------------------------------------
 [ordered]@{ Port = $Port; Domain = $Domain; Saas = [bool]$Saas; Orchestrator = [bool]$Orchestrator; Agency = [bool]$Agency
-            NoService = [bool]$NoService; Skills = $Skills; Updated = (Get-Date -Format s) } |
+            NoService = [bool]$NoService; Skills = $Skills; Online = [bool]$Online; Repo = $Repo; Ref = $Ref
+            Updated = (Get-Date -Format s) } |
     ConvertTo-Json | Set-Content -Encoding ASCII $StateFile
 
 try {
