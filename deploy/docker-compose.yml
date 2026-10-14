@@ -1,0 +1,33 @@
+name: aminos
+services:
+  aminos:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    restart: unless-stopped
+    environment:
+      OLLAMA_BASE_URL: http://ollama:11434/v1
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes: [aminos-data:/data]
+    expose: ["8501"]            # reachable only through Caddy, never published on the host
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+      AMINOS_USER: ${AMINOS_USER:?run install.sh first}
+      AMINOS_PASSWORD_HASH: ${AMINOS_PASSWORD_HASH:?run install.sh first}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [aminos]
+
+  # Local model: documents never leave the server. Start with:  docker compose --profile local-llm up -d
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local-llm"]
+    restart: unless-stopped
+    volumes: [ollama-models:/root/.ollama]
+    expose: ["11434"]
+
+volumes: { aminos-data: {}, caddy-data: {}, ollama-models: {} }

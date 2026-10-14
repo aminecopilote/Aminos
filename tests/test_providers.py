@@ -41,6 +41,15 @@ class ProviderTests(unittest.TestCase):
         with mock.patch("urllib.request.urlopen", lambda r, timeout=0: fake_response("ok")):
             self.assertEqual(openai_compatible_chat("ollama")([], "s"), "ok")
 
+    def test_ollama_base_url_override_only_for_ollama(self):
+        seen = []
+        with mock.patch.dict(os.environ, {"OLLAMA_BASE_URL": "http://ollama:11434/v1/", "GROQ_API_KEY": "k"}), \
+                mock.patch("urllib.request.urlopen", lambda req, timeout=0: seen.append(req.full_url) or fake_response("ok")):
+            openai_compatible_chat("ollama")([{"role": "user", "content": "x"}], "s")
+            openai_compatible_chat("groq", allow_remote=True)([{"role": "user", "content": "x"}], "s")
+        self.assertEqual(seen[0], "http://ollama:11434/v1/chat/completions")
+        self.assertTrue(seen[1].startswith("https://api.groq.com"), seen[1])
+
     def test_http_429_is_retryable_400_is_not(self):
         def boom(code):
             def urlopen(req, timeout=0):

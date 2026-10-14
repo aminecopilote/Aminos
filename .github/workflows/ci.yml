@@ -32,3 +32,20 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: vendor-results, path: lab/results }
+
+  docker:
+    # Builds the real deploy/Dockerfile (including the apt layer with Tesseract) and checks the app answers.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compose file is valid
+        run: AMINOS_USER=x AMINOS_PASSWORD_HASH=x docker compose -f deploy/docker-compose.yml config --quiet
+      - name: Build image
+        run: docker build -f deploy/Dockerfile -t aminos:ci .
+      - name: App starts and is healthy; OCR languages and optional extras are present
+        run: |
+          docker run -d --name aminos -p 8501:8501 aminos:ci
+          for i in $(seq 30); do curl -fsS http://127.0.0.1:8501/_stcore/health && break; sleep 2; done
+          docker exec aminos tesseract --list-langs | grep -E "ara|fra|eng|nld"
+          docker exec aminos python -c "import agent_coordinator, pyhanko, cryptography; print('extras ok')"
+          docker exec aminos id -u | grep -qx 10001

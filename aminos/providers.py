@@ -67,7 +67,8 @@ def openai_compatible_chat(provider: str | Provider, model: str | None = None, m
     key = os.environ.get(p.env_key, "") if p.env_key else ""
     if p.env_key and not key:
         raise RuntimeError(f"{p.env_key} is not set (clé API {p.name})")
-    url = p.base_url.rstrip("/") + "/chat/completions"
+    base = (os.environ.get("OLLAMA_BASE_URL") or p.base_url) if p.name == "ollama" else p.base_url  # e.g. http://ollama:11434/v1 in Docker
+    url = base.rstrip("/") + "/chat/completions"
 
     def chat(messages: list[dict], system: str) -> str:
         body = json.dumps({"model": model or p.model, "temperature": temperature, "max_tokens": max_tokens,
