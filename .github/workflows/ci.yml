@@ -56,9 +56,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
-      - run: deploy/windows/build_bundle.sh
+      - run: deploy/package_all.sh        # builds dist/aminos-windows.zip (used by the windows jobs) and the complete package
       - uses: actions/upload-artifact@v4
         with: { name: aminos-windows, path: dist/aminos-windows.zip }
+      - uses: actions/upload-artifact@v4
+        with: { name: aminos-complet, path: "dist/Aminos-complet-*.zip" }
 
   windows:
     # Installs the bundle on a real Windows machine (single-user with a shared password, and multi-user "saas" mode).
