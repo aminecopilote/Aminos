@@ -14,6 +14,9 @@ Atelier de traduction juridique (AR / FR / EN) : moteur de terminologie, contrô
 - **Mémoire de traduction** (SQLite, `--tm tm.sqlite`) : les paragraphes déjà traduits (≥ 98 % de similitude) sont réutilisés sans appel au modèle ; les traductions sans anomalie sont enregistrées. `aminos tm import|export|lookup` pour échanger en TSV et interroger les correspondances approchées.
 - **Interface web** (`streamlit run app.py`) : envoi du document et des glossaires, choix des langues/mode/OCR, vue source/traduction côte à côte, alertes de contrôle, téléchargement du .docx.
 - **LLM gratuits** (`providers.py`, d'après [mnfst/awesome-free-llm-apis](https://github.com/mnfst/awesome-free-llm-apis)) : `--provider ollama,mistral,groq` essaie les fournisseurs dans l'ordre et passe au suivant en cas de limite (429) ou de panne ; `aminos providers` les liste avec l'état de la clé. Disponibles : ollama (local), groq, mistral, gemini, openrouter, nvidia, huggingface, ovh (sans clé, UE). **Confidentialité** : seul `ollama` garde le document sur votre machine ; les autres sont refusés sauf `--allow-free-tier` (certains paliers gratuits peuvent servir à l'entraînement). Ne les utilisez pas pour des pièces confidentielles. Les modèles par défaut et les limites changent vite : vérifiez la liste et utilisez `--model`.
+- **Mémoire de traduction multilingue** (ar/fr/en/nl) : recherche approchée indexée (FTS5), import **TMX**, alignements **Moses** et **TBX** (corpus et terminologies ONU/UE) : `aminos corpus …`, `aminos tm stats`. Sources et limites : [`lab/CORPORA.md`](lab/CORPORA.md) (aucun corpus réel téléchargeable depuis le cloud pour l'instant).
+- **Agents en parallèle avec reprise** (`--swarm N`, extra `swarm`) : rôles extracteur / terminologue / traducteurs / relecteur / notaire sur [agent-coordinator](https://github.com/SuperInstance/agent-coordinator). Seuls les blocs que la relecture déterministe refuse sont relancés, en montant d'un cran (mode `normal` → `hard`, puis fournisseur suivant). Si rien de concluant n'est obtenu, le travail est rendu **non concluant** (code de sortie 2) avec les anomalies restantes, jamais présenté comme réussi.
+- **Banc d'essai de notarisation locale** (`aminos notary init|seal|verify|ledger`, extra `notary`) : empreinte SHA-256, registre chaîné (modification, suppression ou réordonnancement détectés), PKI d'essai, signature CMS détachée (.docx…) vérifiée par OpenSSL, signature PDF (pyHanko). **Aucun accès réseau.** Ce n'est ni une apostille de La Haye, ni une signature qualifiée eIDAS, et il n'y a pas d'horodatage externe : à n'utiliser qu'avec des documents fictifs.
 - Règles de style du traducteur (noms en gras, **NOM** en majuscules, cachets, logos, aucun commentaire) dans `aminos/prompts.py`.
 
 ## Utilisation
@@ -38,7 +41,7 @@ aminos translate scan.pdf -s arabe -t français --ocr claude --tm tm.sqlite -g g
 aminos check source.txt traduction.txt -g glossary.json
 ```
 
-Tests : `python -m unittest discover -s tests`.
+Tests : `python -m unittest discover -s tests` (avec `pip install -e ".[notary,swarm,docx,test]"` pour exécuter aussi les tests de scellement et d'agents ; sinon ils sont ignorés). Essais des dépôts tiers : `lab/vendor_test.sh`, résultats dans [`lab/REPORT.md`](lab/REPORT.md).
 
 ## Limites
 

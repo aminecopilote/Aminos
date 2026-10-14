@@ -1,0 +1,34 @@
+name: ci
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Core tests only (no optional dependency)
+        run: python -m unittest discover -s tests
+      - name: Install with notarisation and swarm extras
+        run: pip install -e ".[notary,swarm,docx,test]"
+      - name: Full tests (notary seals verified independently with openssl)
+        run: python -m unittest discover -s tests
+
+  vendor:
+    # Third-party repos at pinned commits, run in isolation. Informational: their failures are not ours.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "22" }
+      - run: lab/vendor_test.sh
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: vendor-results, path: lab/results }

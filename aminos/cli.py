@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -45,11 +46,37 @@ def _cmd_translate(a) -> int:
     ocr = {"claude": ocr_claude, "tesseract": lambda: ocr_tesseract(), None: lambda: None}[a.ocr]()
     paragraphs = extract_paragraphs(a.file, ocr)
     tm = TranslationMemory(a.tm) if a.tm else None
+    if a.swarm:
+        return _translate_swarm(a, paragraphs, g, tm)
     out = translate_document(build_chat(a.provider, a.model, a.allow_free_tier), paragraphs, a.source, a.target, g, a.mode,
                              a.jurisdiction, tm=tm)
     build_docx(out, a.target, a.out)
     print(f"{len(out)} paragraphes écrits dans {a.out}")
     return 0
+
+
+def _translate_swarm(a, paragraphs, g, tm) -> int:
+    import asyncio
+    from .providers import build_chat
+    from .swarm import run_job
+    # one chat per provider, so a failing provider is replaced by the next one on the following round
+    chats = [build_chat(p.strip(), a.model, a.allow_free_tier) for p in a.provider.split(",")]
+    notarize = None
+    if a.seal_dir:
+        from .notary import evidence
+        from .notary.pki import create_test_pki
+        pki = create_test_pki(Path(a.seal_dir) / "pki")
+        notarize = lambda path: evidence.check(path, a.seal_dir, pki["ca"], evidence.notarize(path, a.seal_dir, pki))
+    r = asyncio.run(run_job(paragraphs, a.source, a.target, chats, g, tm, jurisdiction=a.jurisdiction,
+                            translators=a.swarm, docx_out=a.out, notarize=notarize))
+    for x in r.rounds:
+        print(f"tour {x['round']} ({x['mode']}, fournisseur {x['chat']}) : {x['chunks_clean']}/{x['chunks_run']} blocs conformes")
+    print(f"{len(paragraphs)} paragraphes dont {r.reused_from_tm} repris de la mémoire -> {a.out}")
+    if r.notary:
+        print("scellement d'essai :", "OK" if r.notary["ok"] else r.notary["problems"])
+    if not r.ok:
+        print("NON CONCLUANT : " + "; ".join(r.remaining_issues[:10]), file=sys.stderr)
+    return 0 if r.ok else 2
 
 
 def _cmd_providers(a) -> int:
@@ -68,10 +95,53 @@ def _cmd_tm(a) -> int:
         print(f"{tm.import_tsv(a.file, a.source, a.target)} segments importés ({len(tm)} au total)")
     elif a.action == "export":
         tm.export_tsv(a.file)
+    elif a.action == "stats":
+        print(f"{len(tm)} segments")
+        for pair, n in tm.stats().items():
+            print(f"  {pair}\t{n}")
     else:
         for m in tm.lookup(a.file, a.source, a.target):
             print(f"{m.score:.0%}\t{m.source}\t{m.target}")
     return 0
+
+
+def _cmd_corpus(a) -> int:
+    from . import corpus
+    if a.kind == "tbx":
+        g = corpus.tbx_to_glossary(a.file, a.source, a.target)
+        g.save(a.out)
+        print(f"{len(g)} termes {a.source}->{a.target} dans {a.out}; {len(g.conflicts)} conflit(s).")
+        return 0
+    from .tm import TranslationMemory
+    tm = TranslationMemory(a.db)
+    langs = [x for x in a.langs.split(",") if x]
+    if a.kind == "tmx":
+        n = corpus.import_tmx(tm, a.file, langs)
+    else:
+        n = corpus.import_moses(tm, a.file, a.file2, langs[0], langs[1])
+    print(f"{n} segments importés ({len(tm)} au total dans {a.db})")
+    return 0
+
+
+def _cmd_notary(a) -> int:
+    from .notary import Ledger, evidence
+    from .notary.pki import create_test_pki
+    wd = Path(a.workdir)
+    if a.action == "init":
+        paths = create_test_pki(wd / "pki")
+        print("PKI d'essai créée :", *[f"{k}={v}" for k, v in paths.items()], sep="\n  ")
+        return 0
+    if a.action == "ledger":
+        n = Ledger(wd / "ledger.jsonl").verify()
+        print(f"registre intact : {n} entrée(s); tête = {Ledger(wd / 'ledger.jsonl').head()}")
+        return 0
+    pki = {k: wd / "pki" / f for k, f in (("ca", "ca.pem"), ("cert", "signer.pem"), ("key", "signer.key"))}
+    if a.action == "seal":
+        print(evidence.notarize(a.file, wd, pki, a.label))
+        return 0
+    r = evidence.check(a.file, wd, pki["ca"])
+    print(json.dumps(r, indent=2, ensure_ascii=False))
+    return 0 if r["ok"] else 1
 
 
 def main(argv=None) -> int:
@@ -101,16 +171,32 @@ def main(argv=None) -> int:
                     help="accepter l'envoi du texte à un fournisseur tiers (documents NON confidentiels)")
     tp.add_argument("--ocr", choices=["claude", "tesseract"], default=None, help="OCR pour scans/images")
     tp.add_argument("--tm", help="base SQLite de mémoire de traduction")
+    tp.add_argument("--swarm", type=int, default=0, metavar="N",
+                    help="N agents traducteurs en parallèle; les blocs non conformes sont relancés (mode puis fournisseur suivant)")
+    tp.add_argument("--seal-dir", help="avec --swarm : sceller le .docx obtenu avec une PKI d'essai dans ce dossier")
     tp.set_defaults(fn=_cmd_translate)
 
     pp = sub.add_parser("providers", help="lister les fournisseurs LLM gratuits")
     pp.set_defaults(fn=_cmd_providers)
 
-    mp = sub.add_parser("tm", help="mémoire de traduction : import | export | lookup")
-    mp.add_argument("action", choices=["import", "export", "lookup"]); mp.add_argument("db")
-    mp.add_argument("file", help="fichier TSV (ou texte à chercher pour lookup)")
+    mp = sub.add_parser("tm", help="mémoire de traduction : import | export | lookup | stats")
+    mp.add_argument("action", choices=["import", "export", "lookup", "stats"]); mp.add_argument("db")
+    mp.add_argument("file", nargs="?", default="", help="fichier TSV (ou texte à chercher pour lookup)")
     mp.add_argument("-s", "--source", default=""); mp.add_argument("-t", "--target", default="")
     mp.set_defaults(fn=_cmd_tm)
+
+    kp = sub.add_parser("corpus", help="importer un corpus public (TMX/Moses -> mémoire, TBX -> glossaire)")
+    kp.add_argument("kind", choices=["tmx", "moses", "tbx"]); kp.add_argument("file")
+    kp.add_argument("file2", nargs="?", help="moses : fichier de la langue cible")
+    kp.add_argument("--db", default="tm.sqlite"); kp.add_argument("--langs", default="ar,fr,en,nl",
+                    help="tmx : langues à garder; moses : source,cible")
+    kp.add_argument("-s", "--source", default="en"); kp.add_argument("-t", "--target", default="fr")
+    kp.add_argument("-o", "--out", default="glossary.json"); kp.set_defaults(fn=_cmd_corpus)
+
+    np_ = sub.add_parser("notary", help="banc d'essai de notarisation locale (PKI d'essai, sceau, registre)")
+    np_.add_argument("action", choices=["init", "seal", "verify", "ledger"]); np_.add_argument("file", nargs="?")
+    np_.add_argument("-w", "--workdir", default="notary-work"); np_.add_argument("--label", default="")
+    np_.set_defaults(fn=_cmd_notary)
 
     a = ap.parse_args(argv)
     return a.fn(a)
