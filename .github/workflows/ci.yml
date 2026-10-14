@@ -76,7 +76,8 @@ jobs:
         run: |
           Expand-Archive aminos-windows.zip -DestinationPath bundle
           Set-Location bundle\aminos-windows
-          $extra = if ("${{ matrix.mode }}" -eq "saas") { @("-Saas") } else { @() }
+          $extra = @{}   # a hashtable splats as named parameters; an array would pass "-Saas" as a positional value
+          if ("${{ matrix.mode }}" -eq "saas") { $extra["Saas"] = $true }
           .\install.ps1 -Dir C:\Aminos -Domain "http://localhost:8080" -NoService @extra
       - name: App healthy and extras importable
         shell: powershell
