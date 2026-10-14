@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"; cd "$ROOT"
 AC_SHA=4d2560d2e53d2d066328ed4a0250376efe44aa2a
 OUT="dist/aminos-windows"; rm -rf dist; mkdir -p "$OUT/wheelhouse"
 
-python3 -m pip wheel -q --no-deps -w "$OUT/wheelhouse" .
+python3 -m pip wheel -q --no-deps -w "$OUT/wheelhouse" . && rm -rf build
 python3 -m pip wheel -q --no-deps -w "$OUT/wheelhouse" "git+https://github.com/SuperInstance/agent-coordinator@${AC_SHA}"
 python3 -m pip download -q --only-binary=:all: --platform win_amd64 --python-version 3.12 --implementation cp --abi cp312 \
   -d "$OUT/wheelhouse" -r deploy/windows/requirements.txt

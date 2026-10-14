@@ -8,3 +8,4 @@ lab/vendor_run.out
 deploy/FIRST_PASSWORD.txt
 deploy/.env
 dist/
+build/
