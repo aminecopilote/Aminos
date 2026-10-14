@@ -12,3 +12,7 @@ pyhanko>=0.25
 pydantic>=2
 rich>=13
 typing-extensions>=4.5
+# Windows-only dependencies: "pip download --platform win_amd64" run on Linux evaluates markers for the host
+# and silently skips them, so they are listed explicitly (the Windows CI job fails if one more is missing).
+tzdata
+colorama
