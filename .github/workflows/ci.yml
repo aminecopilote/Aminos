@@ -49,3 +49,52 @@ jobs:
           docker exec aminos tesseract --list-langs | grep -E "ara|fra|eng|nld"
           docker exec aminos python -c "import agent_coordinator, pyhanko, cryptography; print('extras ok')"
           docker exec aminos id -u | grep -qx 10001
+
+  windows-bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: deploy/windows/build_bundle.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: aminos-windows, path: dist/aminos-windows.zip }
+
+  windows:
+    # Installs the bundle on a real Windows machine: scheduled tasks, Caddy with a password, uninstall.
+    needs: windows-bundle
+    runs-on: windows-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: aminos-windows }
+      - name: Install (Windows PowerShell 5.1, Caddy over HTTP for the test)
+        shell: powershell
+        run: |
+          Expand-Archive aminos-windows.zip -DestinationPath bundle
+          Set-Location bundle\aminos-windows
+          .\install.ps1 -Dir C:\Aminos -Domain "http://localhost:8080"
+      - name: App healthy, password enforced, extras importable
+        shell: powershell
+        run: |
+          $ok = $false
+          foreach ($i in 1..60) {
+            try { if ((Invoke-WebRequest http://127.0.0.1:8501/_stcore/health -UseBasicParsing).Content -eq "ok") { $ok = $true; break } } catch { }
+            Start-Sleep 3
+          }
+          if (-not $ok) { Get-Content C:\Aminos\logs\app.log -ErrorAction SilentlyContinue; Get-ScheduledTask Aminos* | Format-Table; throw "app not healthy" }
+          try { Invoke-WebRequest http://localhost:8080/ -UseBasicParsing | Out-Null; throw "no password asked" } catch { if ($_.Exception.Response.StatusCode.value__ -ne 401) { throw } }
+          $pw = (Get-Content C:\Aminos\FIRST_PASSWORD.txt).Trim()
+          $h = @{ Authorization = "Basic " + [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("aminos:$pw")) }
+          $r = Invoke-WebRequest http://localhost:8080/_stcore/health -Headers $h -UseBasicParsing
+          if ($r.Content -ne "ok") { throw "proxy with password failed" }
+          & C:\Aminos\venv\Scripts\python.exe -c "import aminos, agent_coordinator, pyhanko, cryptography, docx, streamlit; print('extras ok')"
+          if ($LASTEXITCODE -ne 0) { throw "import failed" }
+          & C:\Aminos\venv\Scripts\aminos.exe notary init -w C:\nw
+          if ($LASTEXITCODE -ne 0) { throw "notary init failed" }
+      - name: Uninstall removes tasks and files, keeps data
+        shell: powershell
+        run: |
+          C:\Aminos\uninstall.ps1 -Dir C:\Aminos
+          if (Get-ScheduledTask -TaskName Aminos* -ErrorAction SilentlyContinue) { throw "tasks remain" }
+          if (Test-Path C:\Aminos\venv) { throw "venv remains" }
+          if (-not (Test-Path C:\Aminos\data)) { throw "data was deleted" }
