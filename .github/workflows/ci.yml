@@ -170,7 +170,8 @@ jobs:
         shell: powershell
         run: |
           if (-not (Test-Path C:\Aminos\skills\chatgpt-skills\document-converter-suite\SKILL.md)) { throw "third-party skill missing" }
-          if (Test-Path C:\Aminos\skills\chatgpt-skills\document-converter-suite\scripts) { throw "scripts were copied without --with-scripts" }
+          $bad = Get-ChildItem C:\Aminos\skills\chatgpt-skills -Recurse -File | Where-Object { $_.Extension -in ".py", ".ps1", ".sh", ".bat", ".cmd", ".js", ".ts", ".exe", ".dll" }
+          if ($bad) { throw "script files were copied without --with-scripts: $($bad.FullName -join ', ')" }
           if (-not (Test-Path C:\Aminos\skills\aminos\orchestrateur-central\SKILL.md)) { throw "own skill missing" }
           if (-not (Test-Path C:\Aminos\agency\agent-coordinator\pyproject.toml)) { throw "agent-coordinator copy missing" }
           & C:\Aminos\venv\Scripts\aminos.exe skills verify --dest C:\Aminos\skills
