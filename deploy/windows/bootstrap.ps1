@@ -17,6 +17,10 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+# PowerShell variable names are case-insensitive: $repo and $Repo are the SAME variable. Keep the Aminos repository
+# in variables nothing else reuses (a loop below once overwrote $Repo and recorded the wrong repository).
+$AminosRepo = $Repo
+$AminosRef = $Ref
 try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 -bor [Net.ServicePointManager]::SecurityProtocol } catch { }
 
 # the two agency repositories, at the commits that were tested
@@ -25,16 +29,16 @@ $AgencySources = @{ "agent-coordinator" = "SuperInstance/agent-coordinator@4d256
 
 $work = Join-Path $env:TEMP ("aminos-" + [guid]::NewGuid().ToString("N").Substring(0, 8))
 New-Item -ItemType Directory -Force -Path $work | Out-Null
-function Get-GitHubZip($repo, $ref, $dest) {
-    $zip = Join-Path $work (($repo -replace "/", "_") + ".zip")
-    Write-Host "==> Downloading $repo @ $ref"
-    Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$repo/archive/$ref.zip" -OutFile $zip
+function Get-GitHubZip($zipRepo, $zipRef, $dest) {
+    $zip = Join-Path $work (($zipRepo -replace "/", "_") + ".zip")
+    Write-Host "==> Downloading $zipRepo @ $zipRef"
+    Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/$zipRepo/archive/$zipRef.zip" -OutFile $zip
     Expand-Archive $zip -DestinationPath $dest -Force
     return (Get-ChildItem $dest -Directory | Select-Object -First 1).FullName      # the single top-level folder
 }
 try {
-    $src = Get-GitHubZip $Repo $Ref "$work\src"
-    if (-not (Test-Path "$src\deploy\windows\install.ps1")) { throw "$Repo @ $Ref has no deploy\windows\install.ps1 (wrong ref?)" }
+    $src = Get-GitHubZip $AminosRepo $AminosRef "$work\src"
+    if (-not (Test-Path "$src\deploy\windows\install.ps1")) { throw "$AminosRepo @ $AminosRef has no deploy\windows\install.ps1 (wrong ref?)" }
 
     # lay the files out exactly like the offline bundle, minus the wheelhouse
     $b = "$work\bundle"
@@ -47,13 +51,13 @@ try {
     Copy-Item "$src\agency\AGENTS.md", "$src\agency\MEMORY-orchestrateur.md", "$src\agency\start-agent-hq.mjs" "$b\agency"
     if ($Agency -or ($Update -and (Test-Path "$Dir\agency\agent-hq"))) {
         foreach ($name in $AgencySources.Keys) {
-            $repo, $sha = $AgencySources[$name] -split "@"
-            $root = Get-GitHubZip $repo $sha "$work\$name"
+            $agencyRepo, $agencySha = $AgencySources[$name] -split "@"
+            $root = Get-GitHubZip $agencyRepo $agencySha "$work\$name"
             Copy-Item $root "$b\agency\$name" -Recurse
         }
     }
 
-    $p = @{ Dir = $Dir; Port = $Port; Online = $true; SourceDir = $src; Repo = $Repo; Ref = $Ref }
+    $p = @{ Dir = $Dir; Port = $Port; Online = $true; SourceDir = $src; Repo = $AminosRepo; Ref = $AminosRef }
     if ($Domain) { $p.Domain = $Domain }
     if ($Skills.Count) { $p.Skills = $Skills }
     foreach ($sw in "NoService", "Saas", "Orchestrator", "Agency", "Update") { if ((Get-Variable $sw).Value) { $p[$sw] = $true } }
