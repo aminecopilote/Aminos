@@ -47,3 +47,26 @@ Le dossier Windows n'est pas lisible depuis la session cloud : les glossaires do
 ## Compétence OpenClaw : catalogue d'agents IA
 
 `skills/ai-agents-catalog/` contient une compétence OpenClaw (SKILL.md + catalogue hors ligne de 132 projets tirés de [500-AI-Agents-Projects](https://github.com/ashishpatel26/500-AI-Agents-Projects), licence MIT). Installation : `skills/ai-agents-catalog/install.sh [dossier_workspace]` (défaut `~/.openclaw/workspace`) ou `openclaw skills install skills/ai-agents-catalog`, puis ouvrir une nouvelle session. Les projets listés sont du code tiers : à lire et exécuter en bac à sable.
+
+## Jeu : أسئلة وتحديات / Questions et défis
+
+`jeu/` contient un jeu de soirée dans le navigateur, en arabe (de droite à gauche) avec le français en sous-titre ; le bouton en haut inverse les deux langues. Aucune installation : HTML, CSS et JavaScript sans dépendance (la police Cairo est chargée depuis Google Fonts si Internet est disponible).
+
+**Lancer** : ouvrir `jeu/index.html` dans un navigateur, ou servir le dossier :
+
+```bash
+python3 -m http.server 8000 -d jeu    # puis http://localhost:8000
+```
+
+**Comment jouer**
+
+1. Ajouter de 1 à 8 joueurs, choisir le mode (questions et défis, questions seulement, défis seulement), les catégories et le nombre de manches (3, 5, 8 ou 10).
+2. À son tour, chaque joueur choisit **سؤال / Question** ou **تحدي / Défi**.
+3. **Question** : quatre réponses, 20 secondes si le minuteur est activé. Bonne réponse : 1, 2 ou 3 points selon le niveau (★). Trois bonnes réponses d'affilée : +1 point de bonus (🔥).
+4. **Défi** : le joueur relève le défi (avec un minuteur pour certains), puis les autres décident s'il est réussi ; réussi = 1 à 3 points selon le défi.
+5. **Joker** (🃏, 2 par joueur) : change la carte sans perdre son tour.
+6. Après la dernière manche, le classement s'affiche (ex æquo au même rang). La partie en cours est gardée dans le navigateur et peut être reprise après un rechargement.
+
+**Contenu** : 61 questions en 7 catégories (culture générale, géographie, histoire, sciences, sport, Maroc, énigmes) et 24 défis, dans `jeu/data.js`. Pour en ajouter, suivre le même format ; les tests vérifient que chaque entrée est bilingue et que la bonne réponse existe.
+
+Tests : `node --test jeu/tests/game.test.js` (Node 18 ou plus).
