@@ -1,67 +1,27 @@
 // Couche d'accès aux données de l'espace client.
-// Aujourd'hui tout est simulé à partir de mock.js ; un backend réel remplacera
-// le corps de ces fonctions en gardant les mêmes signatures asynchrones.
-import * as mock from './mock.js'
+// Les écrans n'importent que ce module ; il délègue à l'adaptateur choisi par
+// VITE_EKA_API : « mock » (défaut, données de mock.js en mémoire) ou « http »
+// (API REST à l'adresse VITE_EKA_API_URL, voir server/ et le README).
+// Brancher un autre backend (Supabase, API du cabinet…) = écrire un adaptateur
+// qui respecte l'interface Adaptateur de types.js et l'ajouter ci-dessous.
+import { creerAdaptateurHttp } from './adaptateurs/http.js'
+import { creerAdaptateurMock } from './adaptateurs/mock.js'
 
-const CLE_SESSION = 'eka-session'
-const copie = (v) => structuredClone(v)
-
-function lireStockage() {
-  try {
-    return window.sessionStorage.getItem(CLE_SESSION)
-  } catch {
-    return null
-  }
+export function creerAdaptateur(env = import.meta.env) {
+  const mode = (env.VITE_EKA_API || 'mock').toLowerCase()
+  if (mode === 'http') return creerAdaptateurHttp({ baseUrl: env.VITE_EKA_API_URL || '/api' })
+  if (mode === 'mock') return creerAdaptateurMock()
+  throw new Error(`VITE_EKA_API inconnu : « ${mode} » (attendu : mock ou http).`)
 }
 
-function ecrireStockage(valeur) {
-  try {
-    if (valeur == null) window.sessionStorage.removeItem(CLE_SESSION)
-    else window.sessionStorage.setItem(CLE_SESSION, valeur)
-  } catch {
-    /* stockage indisponible : la session reste en mémoire le temps de l'onglet */
-  }
-}
+const adaptateur = creerAdaptateur()
 
-// ── Authentification (simulée)
-export async function login(email, motDePasse) {
-  const ok =
-    email.trim().toLowerCase() === mock.COMPTE_DEMO.email && motDePasse === mock.COMPTE_DEMO.motDePasse
-  if (!ok) throw new Error('Identifiants incorrects.')
-  ecrireStockage('demo')
-  return getSession()
-}
-
-export async function logout() {
-  ecrireStockage(null)
-}
-
-export async function getSession() {
-  if (lireStockage() !== 'demo') return null
-  return copie(mock.client)
-}
-
-// ── Données métier (simulées)
-export async function getDossiers() {
-  return copie(mock.dossiers)
-}
-
-export async function getDossier(id) {
-  return copie(mock.dossiers.find((d) => d.id === id) ?? null)
-}
-
-export async function getEcheances() {
-  return copie(mock.echeances)
-}
-
-export async function getPaie() {
-  return copie(mock.paie)
-}
-
-export async function getDocuments() {
-  return copie(mock.documents)
-}
-
-export async function getActivite() {
-  return copie(mock.activite)
-}
+export const login = (email, motDePasse) => adaptateur.login(email, motDePasse)
+export const logout = () => adaptateur.logout()
+export const getSession = () => adaptateur.getSession()
+export const getDossiers = () => adaptateur.getDossiers()
+export const getDossier = (id) => adaptateur.getDossier(id)
+export const getEcheances = () => adaptateur.getEcheances()
+export const getPaie = () => adaptateur.getPaie()
+export const getDocuments = () => adaptateur.getDocuments()
+export const getActivite = () => adaptateur.getActivite()
