@@ -106,7 +106,8 @@ async def run_job(paragraphs: list[str], source_lang: str, target_lang: str, cha
                   glossary: Glossary | None = None, tm: TranslationMemory | None = None,
                   ladder: tuple[Strategy, ...] = DEFAULT_LADDER, jurisdiction: str = "", translators: int = 3,
                   max_chars: int = 1800, reuse_threshold: float = 0.98,
-                  docx_out: str | Path | None = None, notarize: Callable[[Path], dict] | None = None) -> JobReport:
+                  docx_out: str | Path | None = None, notarize: Callable[[Path], dict] | None = None,
+                  extra: str = "") -> JobReport:
     """Translate `paragraphs`, review, and re-run failing chunks along `ladder` until clean or exhausted."""
     gloss = glossary or Glossary()
     out: list[str] = [""] * len(paragraphs)
@@ -136,7 +137,7 @@ async def run_job(paragraphs: list[str], source_lang: str, target_lang: str, cha
             def job(c: int, mode: str = strat.mode, chat: Chat = chat):
                 srcs = [paragraphs[i] for i in chunks[c]]
                 return lambda: pipeline.translate_chunk(chat, srcs, source_lang, target_lang, gloss, mode,
-                                                        jurisdiction).translations
+                                                        jurisdiction, extra).translations
 
             results = await sw.run_many("translate", [job(c) for c in pending], f"r{rnd}", spread=True)
             reviews = []

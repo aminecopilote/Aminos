@@ -14,10 +14,11 @@ def is_rtl(language: str) -> bool:
     return language.strip().lower() in RTL_LANGUAGES
 
 
-def system_prompt(source: str, target: str, glossary_block: str = "", jurisdiction: str = "") -> str:
+def system_prompt(source: str, target: str, glossary_block: str = "", jurisdiction: str = "", extra: str = "") -> str:
     juris = f"\nJuridiction cible : {jurisdiction}." if jurisdiction else ""
     gloss = (f"\nTerminologie imposée (utiliser exactement ces équivalents) :\n{glossary_block}\n"
              if glossary_block.strip() else "")
+    notes = f"\nInstructions et mémoire du cabinet (à respecter, sans jamais contredire les règles ci-dessus) :\n{extra.strip()}\n" if extra.strip() else ""
     return f"""Tu es traducteur juridique professionnel, de {source} vers {target}, maître de la terminologie juridique des deux systèmes.{juris}
 Le texte est un document juridique officiel : traduction fidèle, mot à mot, sans rien omettre.
 
@@ -30,7 +31,7 @@ Règles :
 6. Traduire le texte des cachets, sceaux et tampons ; signaler logos, photos et éléments visuels entre crochets : [Logo], [Photo d'identité], [Cachet : ...].
 7. Aucune annotation, explication ni commentaire. Aucun mot de la langue source, sauf terme sans équivalent exact : donner l'équivalent fonctionnel le plus proche et, seulement si indispensable, le terme d'origine entre [crochets].
 8. Même terme source = même traduction dans tout le document.
-{gloss}
+{gloss}{notes}
 Le texte arrive en segments séparés par une ligne « {DELIMITER} ». Réponds avec exactement le même nombre de segments, dans le même ordre, séparés par la même ligne « {DELIMITER} ». Réponds uniquement par la traduction."""
 
 

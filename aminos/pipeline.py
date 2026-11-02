@@ -59,12 +59,13 @@ def deterministic_issues(gloss: Glossary, sources: list[str], translations: list
 
 
 def translate_chunk(chat: Chat, sources: list[str], source_lang: str, target_lang: str,
-                    gloss: Glossary | None = None, mode: str = "normal", jurisdiction: str = "") -> ChunkResult:
+                    gloss: Glossary | None = None, mode: str = "normal", jurisdiction: str = "",
+                    extra: str = "") -> ChunkResult:
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}")
     gloss = gloss or Glossary()
     joined = f"\n{prompts.DELIMITER}\n".join(sources)
-    system = prompts.system_prompt(source_lang, target_lang, gloss.prompt_block(joined), jurisdiction)
+    system = prompts.system_prompt(source_lang, target_lang, gloss.prompt_block(joined), jurisdiction, extra)
     thread: list[dict] = []
 
     def ask(msg: str) -> str:
@@ -99,7 +100,7 @@ def translate_chunk(chat: Chat, sources: list[str], source_lang: str, target_lan
 def translate_document(chat: Chat, paragraphs: list[str], source_lang: str, target_lang: str,
                        gloss: Glossary | None = None, mode: str = "normal", jurisdiction: str = "",
                        max_chars: int = 1800, tm: TranslationMemory | None = None,
-                       reuse_threshold: float = 0.98) -> list[str]:
+                       reuse_threshold: float = 0.98, extra: str = "") -> list[str]:
     """Translate paragraphs; returns one translation per input paragraph.
 
     With a translation memory, paragraphs matching >= reuse_threshold are reused without
@@ -114,7 +115,7 @@ def translate_document(chat: Chat, paragraphs: list[str], source_lang: str, targ
         else:
             todo.append(i)
     for chunk in chunk_paragraphs([paragraphs[i] for i in todo], max_chars):
-        r = translate_chunk(chat, chunk, source_lang, target_lang, gloss, mode, jurisdiction)
+        r = translate_chunk(chat, chunk, source_lang, target_lang, gloss, mode, jurisdiction, extra)
         for src, tgt in zip(chunk, r.translations):
             idx = todo.pop(0)
             out[idx] = tgt

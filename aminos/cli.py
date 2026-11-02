@@ -216,6 +216,10 @@ def _cmd_colab_plan(a) -> int:
 
 
 def main(argv=None) -> int:
+    args = sys.argv[1:] if argv is None else list(argv)
+    if args[:1] == ["superagent"]:
+        from .superagent.cli import main as superagent_main
+        return superagent_main(args[1:])
     ap = argparse.ArgumentParser(prog="aminos")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
