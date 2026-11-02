@@ -54,7 +54,7 @@ def selftest(a) -> int:
         steps.append((name, bool(ok), info))
         print(("OK   " if ok else "FAIL ") + name + (f" : {info}" if info else ""))
 
-    with tempfile.TemporaryDirectory() as d:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as d:
         d = Path(d)
         doc = Document()
         for t in ("CONTRAT DE BAIL N° 2024/118", "Le preneur verse 1 500 dirhams le 5 de chaque mois.",
@@ -82,6 +82,8 @@ def selftest(a) -> int:
                 "LibreOffice absent : certificat seul" if not json.loads(pdf_body)["pdf_has_body"] else "")
         except Exception as e:  # report every failure of the chain, never hide it
             rec("chaîne complète", False, f"{type(e).__name__}: {e}")
+        finally:
+            prof.close()
     bad = [s for s in steps if not s[1]]
     print("AUTOTEST RÉUSSI" if not bad else f"AUTOTEST ÉCHOUÉ ({len(bad)} étape(s))")
     return 1 if bad else 0

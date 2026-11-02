@@ -74,6 +74,10 @@ class Profile:
                 tokenize='unicode61 remove_diacritics 2');
         """)
 
+    def close(self) -> None:
+        """Release the SQLite file (Windows cannot delete an open file)."""
+        self.db.close()
+
     # ---- parameters and instructions ------------------------------
     @property
     def params(self) -> dict:

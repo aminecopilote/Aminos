@@ -42,12 +42,29 @@ def seal_detached_p12(file: str | Path, p12: str | Path, password: str | None = 
     return out
 
 
+def _openssl() -> str | None:
+    import os
+    import shutil
+    found = shutil.which("openssl")
+    if found:
+        return found
+    for p in (r"C:\Program Files\Git\usr\bin\openssl.exe", r"C:\Program Files\OpenSSL-Win64\bin\openssl.exe",
+              r"C:\Program Files\OpenSSL\bin\openssl.exe"):
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def verify_detached(file: str | Path, sig: str | Path, ca: str | Path) -> tuple[bool, str]:
     """Verify with OpenSSL against `ca` only. Returns (ok, openssl message)."""
-    with tempfile.NamedTemporaryFile() as sink:
-        p = subprocess.run(["openssl", "cms", "-verify", "-binary", "-inform", "DER", "-in", str(sig),
-                            "-content", str(file), "-CAfile", str(ca), "-purpose", "any", "-no_check_time",
-                            "-out", sink.name], capture_output=True, text=True)
+    import os
+    exe = _openssl()
+    if not exe:
+        return False, "openssl introuvable (sous Windows : installez Git for Windows ou OpenSSL)"
+    # -out os.devnull: an open temporary file cannot be written by another process on Windows
+    p = subprocess.run([exe, "cms", "-verify", "-binary", "-inform", "DER", "-in", str(sig),
+                        "-content", str(file), "-CAfile", str(ca), "-purpose", "any", "-no_check_time",
+                        "-out", os.devnull], capture_output=True, text=True)
     return p.returncode == 0, (p.stderr or p.stdout).strip()
 
 
