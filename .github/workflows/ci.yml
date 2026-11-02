@@ -14,7 +14,7 @@ jobs:
       - name: Core tests only (no optional dependency)
         run: python -m unittest discover -s tests
       - name: Install with notarisation and swarm extras
-        run: pip install -e ".[notary,swarm,docx,test,stamp]"
+        run: pip install -e ".[notary,swarm,docx,test,stamp,web]"
       - name: Full tests (notary seals verified independently with openssl)
         run: python -m unittest discover -s tests
 
