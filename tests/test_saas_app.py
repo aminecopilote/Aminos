@@ -44,14 +44,18 @@ class SaasAppTests(unittest.TestCase):
         self.assertTrue(at.error and "incorrect" in at.error[0].value)
         at = self.login(self.app(), "root", PW)
         self.assertFalse(at.exception, at.exception)
-        self.assertTrue(at.tabs and [t.label for t in at.tabs] == ["Traduction", "Administration"])
+        labels = [t.label for t in at.tabs]
+        for expected in ("Traduction", "Superagent", "Administration"):
+            self.assertIn(expected, labels)
 
     def test_regular_user_sees_no_admin_and_locked_down_sidebar(self):
         from aminos.saas import SaaSStore
         SaaSStore(self.data).create_user("alice", PW, "cabinet-a")
         at = self.login(self.app(), "alice", PW)
         self.assertFalse(at.exception, at.exception)
-        self.assertFalse(at.tabs)
+        tab_labels = [t.label for t in at.tabs]
+        self.assertIn("Superagent", tab_labels)
+        self.assertNotIn("Administration", tab_labels)
         labels = [w.label for w in at.sidebar.text_input]
         self.assertNotIn("Clé ANTHROPIC_API_KEY", labels)          # no key typed into a shared process
         self.assertNotIn("Base de mémoire de traduction", labels)  # no user-chosen path
