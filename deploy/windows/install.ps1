@@ -57,7 +57,7 @@ if (-not $Online) {
 
 # --- stop what is running from $Dir (Windows cannot replace files that are in use) -----------------------------
 function Stop-Aminos {
-    foreach ($t in "Aminos", "Aminos-Caddy", "Aminos-Orchestrator", "Aminos-AgentHQ") {
+    foreach ($t in "Aminos", "Aminos-ERP", "Aminos-Caddy", "Aminos-Orchestrator", "Aminos-AgentHQ") {
         Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
     }
     Get-Process caddy, streamlit, python, node, powershell -ErrorAction SilentlyContinue |
@@ -110,7 +110,7 @@ if ($Online) {
     if ($LASTEXITCODE -ne 0) { throw "Aminos installation failed" }
 }
 Copy-Item "$Bundle\app.py", "$Bundle\saas_app.py" "$Dir\app\" -Force
-Copy-Item "$Bundle\run-app.ps1", "$Bundle\run-orchestrator.ps1", "$Bundle\run-agent-hq.ps1", "$Bundle\Lancer-Aminos.bat",
+Copy-Item "$Bundle\run-app.ps1", "$Bundle\run-erp.ps1", "$Bundle\run-orchestrator.ps1", "$Bundle\run-agent-hq.ps1", "$Bundle\Lancer-Aminos.bat",
           "$Bundle\uninstall.ps1", "$Bundle\update.ps1" "$Dir\" -Force
 if (Test-Path "$Bundle\bootstrap.ps1") { Copy-Item "$Bundle\bootstrap.ps1" "$Dir\" -Force }
 # our own skills (the third-party ones live next to them, managed by `aminos skills`)
@@ -145,6 +145,11 @@ if ($Domain) {
         if ((Get-FileHash -Algorithm $alg "$Dir\caddy\$zipName").Hash.ToLower() -ne $expected.ToLower()) { throw "Caddy download checksum mismatch" }
         Expand-Archive "$Dir\caddy\$zipName" -DestinationPath "$Dir\caddy" -Force
     }
+    $ErpPort = 8502
+    # multi-user Caddyfiles written by an older version lack the back-office route: they are generated, so regenerate
+    if ($Saas -and (Test-Path "$Dir\caddy\Caddyfile") -and -not (Select-String -Path "$Dir\caddy\Caddyfile" -Pattern "/erp/\*" -Quiet)) {
+        Remove-Item "$Dir\caddy\Caddyfile" -Force
+    }
     if (-not (Test-Path "$Dir\caddy\Caddyfile")) {
         if ($Saas) {
             $auth = ""           # the application authenticates users itself; Caddy only provides HTTPS
@@ -155,7 +160,12 @@ if ($Domain) {
             Set-Content -Encoding ASCII "$Dir\FIRST_PASSWORD.txt" $password
             Protect-File "$Dir\FIRST_PASSWORD.txt"
         }
-        "$Domain {`n$auth`treverse_proxy 127.0.0.1:$Port`n}`n" | Set-Content -Encoding ASCII "$Dir\caddy\Caddyfile"
+        if ($Saas) {
+            "$Domain {`n`thandle /erp/* {`n`t`treverse_proxy 127.0.0.1:$ErpPort`n`t}`n`thandle {`n`t`treverse_proxy 127.0.0.1:$Port`n`t}`n}`n" |
+                Set-Content -Encoding ASCII "$Dir\caddy\Caddyfile"
+        } else {
+            "$Domain {`n$auth`treverse_proxy 127.0.0.1:$Port`n}`n" | Set-Content -Encoding ASCII "$Dir\caddy\Caddyfile"
+        }
     }
     if ($admin -and $Domain -notmatch "^http://") {
         foreach ($p in 80, 443) { New-NetFirewallRule -DisplayName "Aminos HTTP/S $p" -Direction Inbound -Protocol TCP -LocalPort $p -Action Allow -ErrorAction SilentlyContinue | Out-Null }
@@ -199,6 +209,7 @@ function Start-Component($name, $exe, $argLine) {
 $ps = "powershell.exe"
 $psArgs = { param($script, $more) "-NoProfile -ExecutionPolicy Bypass -File `"$Dir\$script`" -Dir `"$Dir`" $more" }
 Start-Component "Aminos" $ps (& $psArgs "run-app.ps1" "-Port $Port$(if ($Saas) { ' -Saas' })")
+if ($Saas) { Start-Component "Aminos-ERP" $ps (& $psArgs "run-erp.ps1" "-Port 8502") }
 if ($Domain) { Start-Component "Aminos-Caddy" "$Dir\caddy\caddy.exe" "run --config `"$Dir\caddy\Caddyfile`" --adapter caddyfile" }
 if ($Orchestrator) {
     New-Item -ItemType Directory -Force -Path "C:\orchestrator\logs" | Out-Null
@@ -226,6 +237,10 @@ if ($Domain) {
 } else {
     Write-Host "URL:   http://127.0.0.1:$Port  (local only: open it from this server, or tunnel: ssh -L ${Port}:127.0.0.1:${Port} user@server)"
     if ($Saas) { Write-Host "User:  admin" }
+}
+if ($Saas) {
+    $erpBase = if ($Domain) { if ($Domain -match '^http') { $Domain } else { "https://$Domain" } } else { "http://127.0.0.1:8502" }
+    Write-Host "Back-office (clients, cases, quotes, invoices): $erpBase/erp/"
 }
 if ($password) { Write-Host "Pass:  $password   <- save it, then delete $Dir\FIRST_PASSWORD.txt (keep saas.env: it also holds the data folder setting)" }
 elseif ($Update) { Write-Host "Passwords and data are unchanged." }

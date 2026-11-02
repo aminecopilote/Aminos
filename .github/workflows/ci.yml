@@ -14,9 +14,54 @@ jobs:
       - name: Core tests only (no optional dependency)
         run: python -m unittest discover -s tests
       - name: Install with notarisation and swarm extras
-        run: pip install -e ".[notary,swarm,docx,test]"
+        run: pip install -e ".[notary,swarm,docx,test,stamp]"
       - name: Full tests (notary seals verified independently with openssl)
         run: python -m unittest discover -s tests
+
+  erp-ui:
+    # The back-office in a real browser (Chromium): sign in, client, case, quote, invoice, payment, dashboard.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e . playwright && playwright install --with-deps chromium
+      - name: Start the back-office and drive it
+        run: |
+          export AMINOS_DATA_DIR=$RUNNER_TEMP/saas AMINOS_ADMIN_USER=admin AMINOS_ADMIN_PASSWORD='Correct-horse-battery-1'
+          python -m aminos.erp --port 8502 &
+          for i in $(seq 30); do curl -fsS -o /dev/null http://127.0.0.1:8502/erp/ && break; sleep 1; done
+          python tests/ui_erp.py http://127.0.0.1:8502 "$AMINOS_ADMIN_PASSWORD" erp.png
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: erp-screenshot, path: erp.png }
+
+  ubuntu-native:
+    # deploy/ubuntu/install.sh on a real Ubuntu: venv + systemd units; Caddy and ufw are skipped on the runner.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: sudo bash deploy/ubuntu/install.sh --source "$GITHUB_WORKSPACE" --no-caddy --no-ufw
+      - name: Services healthy, administrator can use the back-office, secrets private
+        run: |
+          systemctl is-active aminos aminos-erp
+          PW=$(sudo grep '^AMINOS_ADMIN_PASSWORD=' /etc/aminos/aminos.env | cut -d= -f2)
+          curl -fsS -c jar -H 'Content-Type: application/json' -d "{\"username\":\"admin\",\"password\":\"$PW\"}" http://127.0.0.1:8502/erp/api/login > login.json
+          CSRF=$(python3 -c "import json;print(json.load(open('login.json'))['csrf'])")
+          curl -fsS -b jar -H 'Content-Type: application/json' -H "X-CSRF-Token: $CSRF" -d '{"name":"CI client"}' http://127.0.0.1:8502/erp/api/clients | grep -q 'CI client'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{"name":"x"}' http://127.0.0.1:8502/erp/api/clients)" = 401
+          test "$(stat -c %a /etc/aminos/aminos.env)" = 640
+          ! ss -ltn | grep -E '0\.0\.0\.0:(8501|8502)'     # nothing listens on a public address
+      - name: Update keeps accounts, then uninstall keeps data
+        run: |
+          B=$(sudo md5sum /etc/aminos/aminos.env)
+          sudo bash deploy/ubuntu/install.sh --update --source "$GITHUB_WORKSPACE" --no-caddy --no-ufw
+          test "$B" = "$(sudo md5sum /etc/aminos/aminos.env)"
+          systemctl is-active aminos aminos-erp
+          sudo bash deploy/ubuntu/install.sh --uninstall
+          test -d /var/lib/aminos
+          ! systemctl is-active aminos
 
   vendor:
     # Third-party repos at pinned commits, run in isolation. Informational: their failures are not ours.
@@ -49,6 +94,9 @@ jobs:
           docker exec aminos tesseract --list-langs | grep -E "ara|fra|eng|nld"
           docker exec aminos python -c "import agent_coordinator, pyhanko, cryptography; print('extras ok')"
           docker exec aminos id -u | grep -qx 10001
+          docker exec aminos aminos superagent selftest
+          docker run -d --name erp -e AMINOS_DATA_DIR=/data/saas aminos:ci python -m aminos.erp --host 0.0.0.0 --port 8502 --data /data/saas
+          for i in $(seq 30); do docker exec erp python -c "import urllib.request as u; u.urlopen('http://127.0.0.1:8502/erp/')" && break; sleep 1; done
 
   windows-bundle:
     runs-on: ubuntu-latest
@@ -106,6 +154,23 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "import failed" }
           & C:\Aminos\venv\Scripts\aminos.exe notary init -w C:\nw
           if ($LASTEXITCODE -ne 0) { throw "notary init failed" }
+      - name: Back-office through Caddy and superagent self-test (multi-user modes)
+        if: matrix.mode != 'single'
+        shell: powershell
+        run: |
+          $ok = $false
+          foreach ($i in 1..40) { try { if ((Invoke-WebRequest http://127.0.0.1:8502/erp/ -UseBasicParsing).StatusCode -eq 200) { $ok = $true; break } } catch { }; Start-Sleep 3 }
+          if (-not $ok) { Get-Content C:\Aminos\logs\erp.log -ErrorAction SilentlyContinue; throw "back-office not reachable" }
+          if ((Invoke-WebRequest http://localhost:8080/erp/ -UseBasicParsing).StatusCode -ne 200) { throw "back-office not reachable through Caddy" }
+          $pw = (Get-Content C:\Aminos\FIRST_PASSWORD.txt).Trim()
+          $r = Invoke-WebRequest http://localhost:8080/erp/api/login -Method Post -ContentType application/json -UseBasicParsing -SessionVariable s `
+                 -Body (@{ username = "admin"; password = $pw } | ConvertTo-Json)
+          $csrf = ($r.Content | ConvertFrom-Json).csrf
+          $c = Invoke-RestMethod http://localhost:8080/erp/api/clients -Method Post -ContentType application/json -WebSession $s `
+                 -Headers @{ "X-CSRF-Token" = $csrf } -Body '{"name":"CI client"}'
+          if ($c.name -ne "CI client") { throw "client not created" }
+          & C:\Aminos\venv\Scripts\aminos.exe superagent selftest
+          if ($LASTEXITCODE -ne 0) { throw "superagent self-test failed" }
       - name: Single-user mode asks for the shared password
         if: matrix.mode == 'single'
         shell: powershell
@@ -241,6 +306,14 @@ jobs:
           if (-not $hq) { Get-Content C:\Aminos\logs\agent-hq.log -ErrorAction SilentlyContinue; throw "agent-hq not healthy" }
           foreach ($i in 1..40) { if (Get-ChildItem C:\orchestrator\logs\orch-*.jsonl -ErrorAction SilentlyContinue) { break }; Start-Sleep 3 }
           if (-not (Get-ChildItem C:\orchestrator\logs\orch-*.jsonl -ErrorAction SilentlyContinue)) { throw "no orchestrator cycle" }
+      - name: Back-office and superagent self-test (online install)
+        shell: powershell
+        run: |
+          $ok = $false
+          foreach ($i in 1..40) { try { if ((Invoke-WebRequest http://127.0.0.1:8502/erp/ -UseBasicParsing).StatusCode -eq 200) { $ok = $true; break } } catch { }; Start-Sleep 3 }
+          if (-not $ok) { Get-Content C:\Aminos\logs\erp.log -ErrorAction SilentlyContinue; throw "back-office not reachable" }
+          & C:\Aminos\venv\Scripts\aminos.exe superagent selftest
+          if ($LASTEXITCODE -ne 0) { throw "superagent self-test failed" }
       - name: Online update keeps the administrator password
         shell: powershell
         run: |

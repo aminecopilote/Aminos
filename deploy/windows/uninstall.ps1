@@ -1,6 +1,6 @@
 # Removes tasks, firewall rules and the program files. Data (translation memory) is kept in <dir>\data unless -DeleteData.
 param([string]$Dir = (Split-Path -Parent $MyInvocation.MyCommand.Path), [switch]$DeleteData)
-foreach ($t in "Aminos", "Aminos-Caddy", "Aminos-Orchestrator", "Aminos-AgentHQ") {
+foreach ($t in "Aminos", "Aminos-ERP", "Aminos-Caddy", "Aminos-Orchestrator", "Aminos-AgentHQ") {
     Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $t -Confirm:$false -ErrorAction SilentlyContinue
 }

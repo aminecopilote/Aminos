@@ -45,7 +45,7 @@ try {
     New-Item -ItemType Directory -Force -Path $b, "$b\agency" | Out-Null
     $w = "$src\deploy\windows"
     Copy-Item "$src\app.py", "$src\saas_app.py" $b
-    Copy-Item "$w\install.ps1", "$w\update.ps1", "$w\bootstrap.ps1", "$w\run-app.ps1", "$w\run-orchestrator.ps1", "$w\run-agent-hq.ps1",
+    Copy-Item "$w\install.ps1", "$w\update.ps1", "$w\bootstrap.ps1", "$w\run-app.ps1", "$w\run-erp.ps1", "$w\run-orchestrator.ps1", "$w\run-agent-hq.ps1",
               "$w\uninstall.ps1", "$w\Lancer-Aminos.bat", "$w\requirements.txt" $b
     Copy-Item "$src\skills" "$b\skills" -Recurse
     Copy-Item "$src\agency\AGENTS.md", "$src\agency\MEMORY-orchestrateur.md", "$src\agency\start-agent-hq.mjs" "$b\agency"

@@ -8,5 +8,10 @@
 		X-Content-Type-Options nosniff
 		Referrer-Policy no-referrer
 	}
-	reverse_proxy aminos:8501
+	handle /erp/* {
+		reverse_proxy erp:8502
+	}
+	handle {
+		reverse_proxy aminos:8501
+	}
 }

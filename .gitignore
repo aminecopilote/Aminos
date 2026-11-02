@@ -10,3 +10,5 @@ deploy/.env
 dist/
 build/
 agency/data/
+superagent-profile/
+superagent-work/

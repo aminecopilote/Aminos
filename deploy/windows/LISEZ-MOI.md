@@ -38,3 +38,7 @@ iwr https://raw.githubusercontent.com/aminecopilote/Aminos/<COMMIT>/deploy/windo
 Les options sont les mêmes que `install.ps1` (`-Domain`, `-Orchestrator`, `-Agency`, `-Skills`). Le script est téléchargé puis exécuté en deux temps pour que vous
 puissiez le relire avant (`notepad $env:TEMP\aminos-bootstrap.ps1`). Mise à jour : `C:\Aminos\update.ps1 -Ref <nouveau commit>`.
 Différence avec le paquet hors ligne : les dépendances viennent de PyPI au moment de l'installation, sans les sommes de contrôle du paquet.
+
+## Back-office et superagent (mode `-Saas`)
+
+Avec `-Saas`, la tâche planifiée **Aminos-ERP** démarre aussi le back-office (clients, dossiers, devis, factures) sur `http://127.0.0.1:8502/erp/`, et Caddy le publie sous `https://votre.domaine/erp/` si vous donnez `-Domain`. Mêmes identifiants que l'application. Le **superagent** est l'onglet « Superagent » de l'application ; en ligne de commande : `C:\Aminos\venv\Scripts\aminos.exe superagent selftest` (essai complet), puis voir `deploy/SUPERAGENT.md`. Les pages traduites en PDF demandent LibreOffice (`winget install TheDocumentFoundation.LibreOffice`) ; sans lui, la certification ne comprend que la page de certification. Logs : `C:\Aminos\logs\erp.log`.

@@ -14,6 +14,7 @@ import streamlit as st
 from aminos.providers import PROVIDERS
 from aminos.saas import AuthError, QuotaExceeded, SaaSStore
 from aminos.saas.store import new_password
+from aminos.superagent.ui import render_superagent
 from aminos.webui import UiContext, render
 
 st.set_page_config(page_title="Aminos", layout="wide")
@@ -138,14 +139,23 @@ def main() -> None:
         after_translate=lambda digest, name: S.audit(user, "translate", digest, name))
 
     st.title("Aminos — traduction juridique")
+    tenant = S.tenant_dir(user.org)
+
+    def superagent() -> None:
+        render_superagent(tenant / "profile", tenant / "work", ctx.providers, ctx.default_provider, remote, S.tm_path(user),
+                          ctx.before_translate, ctx.after_translate)
+    labels = ["Traduction", "Superagent", "Back-office (/erp/)"] + (["Administration"] if user.is_admin else [])
+    tabs = st.tabs(labels)
+    with tabs[0]:
+        render(ctx)
+    with tabs[1]:
+        superagent()
+    with tabs[2]:
+        st.markdown("Clients, dossiers, devis, factures et paiements : **[ouvrir le back-office](/erp/)** (mêmes identifiants).")
     if user.is_admin:
-        t1, t2 = st.tabs(["Traduction", "Administration"])
-        with t1:
-            render(ctx)
-        with t2:
+        with tabs[3]:
             admin_tab(user)
     else:
-        render(ctx)
         docs, chars = S.usage_today(user.username)
         st.sidebar.caption(f"Aujourd'hui : {docs}/{user.quota_docs_day} documents")
 

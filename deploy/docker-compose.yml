@@ -12,6 +12,22 @@ services:
     volumes: [aminos-data:/data]
     expose: ["8501"]            # reachable only through Caddy, never published on the host
 
+  # Back-office (clients, cases, quotes, invoices) at /erp/ : same image, same accounts, same data volume
+  erp:
+    build: { context: .., dockerfile: deploy/Dockerfile }
+    restart: unless-stopped
+    command: ["python", "-m", "aminos.erp", "--host", "0.0.0.0", "--port", "8502", "--data", "/data/saas"]
+    environment:
+      AMINOS_DATA_DIR: /data/saas
+    volumes: [aminos-data:/data]
+    expose: ["8502"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://127.0.0.1:8502/erp/')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on: [aminos]
+
   caddy:
     image: caddy:2
     restart: unless-stopped
@@ -21,7 +37,7 @@ services:
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data
-    depends_on: [aminos]
+    depends_on: [aminos, erp]
 
   # Local model: documents never leave the server. Start with:  docker compose --profile local-llm up -d
   ollama:

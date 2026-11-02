@@ -24,3 +24,6 @@ aminos = "aminos.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["aminos*"]
+
+[tool.setuptools.package-data]
+aminos = ["erp/index.html", "erp/static/*"]
