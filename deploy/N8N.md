@@ -1,4 +1,4 @@
-# Automatisation n8n : surveiller et piloter les services Aminos
+# Automatisation n8n : surveiller et piloter les services Aminos (installation directe, sans Docker)
 
 [n8n](https://n8n.io) exécute des workflows planifiés ou déclenchés par un formulaire. Aminos livre cinq workflows prêts à l'emploi, testés contre un vrai n8n (version épinglée **2.46.4**), et une API à jetons limités pour qu'ils puissent parler aux services.
 
@@ -28,20 +28,19 @@ Les quatre premiers ont aussi un déclencheur manuel (« Lancer à la main »). 
 | Cible | Commande |
 |---|---|
 | **Ubuntu natif** | `sudo bash install.sh --domain votre.domaine --n8n --alert-url https://…` (installe Node 24 depuis NodeSource, n8n, un service `aminos-n8n`) |
-| **Docker** | `cd deploy && bash n8n-setup.sh https://…` (profil compose `n8n`) |
 | **Windows Server** | `.\bootstrap.ps1 -Ref <ref> -Saas -Domain votre.domaine -N8n -AlertUrl https://…` (Node 24 portable vérifié par somme SHA-256, tâche planifiée `Aminos-N8n`) |
 
-Les mises à jour gardent vos workflows et vos modifications ; `--n8n-reimport` (Ubuntu), `-N8nReimport` (Windows) ou relancer `n8n-setup.sh` les rechargent depuis le modèle et **écrasent vos modifications**.
+Les mises à jour gardent vos workflows et vos modifications ; `--n8n-reimport` (Ubuntu), `-N8nReimport` (Windows) ou les rechargent depuis le modèle et **écrasent vos modifications**.
 
 Jetons à la main : `python -m aminos.erp token create --scope system --label ops` (affiché une seule fois), `token list`, `token revoke --id N`. Le secret du formulaire est dans `credentials.json` (lisible seulement par root / le compte du service).
 
 ## Sauvegarde d'n8n lui-même
 
-Les identifiants n8n sont chiffrés avec une clé générée au premier démarrage (`config` dans le dossier de données n8n). Sauvegardez ce dossier **avec** sa clé, ailleurs que sur le serveur (`$DATA/n8n` sous Ubuntu, `data\n8n` sous Windows, volume `n8n-data` sous Docker). La sauvegarde nocturne d'Aminos couvre les données d'Aminos, pas n8n.
+Les identifiants n8n sont chiffrés avec une clé générée au premier démarrage (`config` dans le dossier de données n8n). Sauvegardez ce dossier **avec** sa clé, ailleurs que sur le serveur (`/var/lib/aminos/n8n` sous Ubuntu, `data\n8n` sous Windows). La sauvegarde nocturne d'Aminos couvre les données d'Aminos, pas n8n.
 
 ## Limites
 
-- Testé : chaque workflow importé et exécuté dans n8n 2.46.4 contre le vrai back-office (alertes reçues, sauvegarde vérifiée, client et dossier créés par le webhook), et les trois installateurs en CI. Non testé : l'envoi vers un vrai Slack/Discord, la publication derrière un vrai nom de domaine, une charge réelle.
+- Testé : chaque workflow importé et exécuté dans n8n 2.46.4 contre le vrai back-office (alertes reçues, sauvegarde vérifiée, client et dossier créés par le webhook); installateurs Ubuntu et Windows en CI. Non testé : l'envoi vers un vrai Slack/Discord, la publication derrière un vrai nom de domaine, une charge réelle.
 - Le webhook de formulaire est public (protégé par le secret) : mettez-le derrière un formulaire qui n'expose pas le secret au navigateur (appel depuis votre serveur web), sinon n'importe quel visiteur pourrait le copier.
 - `npm install n8n` échoue avec EBADPLATFORM (dépendance optionnelle d'une autre plateforme déclarée comme obligatoire) : les installateurs utilisent `--force`, ce qui est sans effet sur les paquets de votre plateforme.
 - Une seule instance n8n, sans file d'attente ni haute disponibilité.

@@ -8,10 +8,6 @@
 		X-Content-Type-Options nosniff
 		Referrer-Policy no-referrer
 	}
-	# n8n production webhooks only (the n8n editor is never published); inert when the n8n profile is off
-	handle /webhook/* {
-		reverse_proxy n8n:5678
-	}
 	handle /erp/* {
 		reverse_proxy erp:8502
 	}

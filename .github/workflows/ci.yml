@@ -90,36 +90,6 @@ jobs:
       - run: npm install --prefix "$RUNNER_TEMP/n8n" n8n@2.46.4 --force --no-audit --no-fund --loglevel=error
       - run: N8N_BIN="$RUNNER_TEMP/n8n/node_modules/.bin/n8n" python tests/n8n_e2e.py
 
-  docker-n8n:
-    # The Docker route: deploy/n8n-setup.sh builds the images, creates tokens, imports and activates the workflows.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up n8n with compose
-        working-directory: deploy
-        run: |
-          printf 'AMINOS_ADMIN_USER=admin\nAMINOS_ADMIN_PASSWORD=Correct-horse-battery-1\nDOMAIN=localhost\n' > .env
-          bash n8n-setup.sh
-      - name: Webhook creates a client and a case; the editor is not published
-        working-directory: deploy
-        run: |
-          SECRET=$(docker compose run --rm --no-deps aminos python -c "import json;print(next(c['data']['value'] for c in json.load(open('/data/n8n-setup/credentials.json')) if c['name']=='Aminos secret formulaire'))")
-          for i in $(seq 60); do
-            CODE=$(curl -s -o resp.json -w '%{http_code}' -X POST -H "X-Aminos-Secret: $SECRET" -H 'Content-Type: application/json' \
-              -d '{"name":"CI Form","title":"Acte","src":"ar","tgt":"fr"}' http://127.0.0.1:5678/webhook/aminos-demande)
-            [ "$CODE" = 201 ] && break; sleep 2
-          done
-          if [ "$CODE" != 201 ]; then
-            echo "last HTTP code: $CODE"; cat resp.json || true
-            docker compose --profile n8n exec -T n8n sh -c 'id; ls -la /home/node/.n8n; n8n list:workflow --active=true 2>&1' || true
-            echo "---- n8n start-up log"
-            docker compose --profile n8n logs n8n | grep -v -E "migration|license SDK" | head -80
-            exit 1
-          fi
-          cat resp.json
-          ! ss -ltn | grep -E '0\.0\.0\.0:5678'
-          docker compose --profile n8n logs n8n | tail -5
-
   vendor:
     # Third-party repos at pinned commits, run in isolation. Informational: their failures are not ours.
     runs-on: ubuntu-latest

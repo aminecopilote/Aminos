@@ -28,35 +28,6 @@ services:
       retries: 3
     depends_on: [aminos]
 
-  # Automation (workflows that watch and operate the services). Start with:  docker compose --profile n8n up -d
-  # The editor is NOT published: reach it through an SSH tunnel (ssh -L 5678:127.0.0.1:5678 user@server, then
-  # http://localhost:5678). Only /webhook/* is exposed by Caddy, so nobody can claim the owner account before you.
-  # Set up the workflows and credentials once with: bash n8n-setup.sh
-  n8n:
-    image: n8nio/n8n:2.46.4
-    profiles: ["n8n"]
-    restart: unless-stopped
-    environment:
-      WEBHOOK_URL: https://${DOMAIN:-localhost}/
-      N8N_PROXY_HOPS: "1"
-      N8N_SECURE_COOKIE: "false"           # the editor is only reached over the loopback tunnel (http)
-      GENERIC_TIMEZONE: ${TZ:-Africa/Casablanca}
-      N8N_DIAGNOSTICS_ENABLED: "false"
-      N8N_VERSION_NOTIFICATIONS_ENABLED: "false"
-      N8N_PERSONALIZATION_ENABLED: "false"
-      EXECUTIONS_DATA_PRUNE: "true"
-      EXECUTIONS_DATA_MAX_AGE: "336"
-      NODES_EXCLUDE: '["n8n-nodes-base.executeCommand","n8n-nodes-base.localFileTrigger","n8n-nodes-base.readWriteFile"]'
-    volumes:
-      - n8n-data:/home/node/.n8n
-      - aminos-data:/import:ro
-    ports: ["127.0.0.1:5678:5678"]
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:5678/healthz || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-
   caddy:
     image: caddy:2
     restart: unless-stopped
@@ -76,4 +47,4 @@ services:
     volumes: [ollama-models:/root/.ollama]
     expose: ["11434"]
 
-volumes: { aminos-data: {}, caddy-data: {}, ollama-models: {}, n8n-data: {} }
+volumes: { aminos-data: {}, caddy-data: {}, ollama-models: {} }
