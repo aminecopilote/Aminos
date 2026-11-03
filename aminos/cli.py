@@ -217,6 +217,9 @@ def _cmd_colab_plan(a) -> int:
 
 def main(argv=None) -> int:
     args = sys.argv[1:] if argv is None else list(argv)
+    if args[:1] == ["n8n"]:
+        from .n8n import main as n8n_main
+        return n8n_main(args[1:])
     if args[:1] == ["superagent"]:
         from .superagent.cli import main as superagent_main
         return superagent_main(args[1:])

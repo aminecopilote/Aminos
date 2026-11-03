@@ -16,6 +16,9 @@ param(
     [switch]$Saas,          # multi-user mode: accounts, one data folder per firm, quotas, audit log
     [switch]$Orchestrator,  # supervision loop "Orchestrateur Central" (task Aminos-Orchestrator, logs in C:\orchestrator\logs)
     [switch]$Agency,        # local copies of agent-hq and agent-coordinator (chef d'agence); agent-hq needs Node 22
+    [switch]$N8n,           # n8n automation (needs Node 24, downloaded next to the app): monitoring, nightly backup, digest, web form intake
+    [string]$AlertUrl = "", # webhook that receives the alerts (Slack, Mattermost, Discord, ntfy...)
+    [switch]$N8nReimport,   # load the workflows again (overwrites edits made in n8n)
     [string[]]$Skills = @(),# third-party skills, "source:skill" (see: aminos skills available chatgpt-skills)
     [switch]$Update,        # reuse the options recorded by the previous install
     [switch]$Online,        # set by bootstrap.ps1: no wheelhouse, dependencies come from PyPI
@@ -23,6 +26,7 @@ param(
     [string]$Repo = "",     # online: recorded for updates
     [string]$Ref = ""       # online: recorded for updates
 )
+$N8nVersion = "2.46.4"
 $AgentCoordinatorSha = "4d2560d2e53d2d066328ed4a0250376efe44aa2a"   # the commit that was tested
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -42,6 +46,7 @@ if ($Update) {
     if (-not $PSBoundParameters.ContainsKey("Saas")) { $Saas = [bool]$prev.Saas }
     if (-not $PSBoundParameters.ContainsKey("Orchestrator")) { $Orchestrator = [bool]$prev.Orchestrator }
     if (-not $PSBoundParameters.ContainsKey("Agency")) { $Agency = [bool]$prev.Agency }
+    if (-not $PSBoundParameters.ContainsKey("N8n")) { $N8n = [bool]$prev.N8n }
     if (-not $PSBoundParameters.ContainsKey("NoService")) { $NoService = [bool]$prev.NoService }
 }
 
@@ -57,7 +62,7 @@ if (-not $Online) {
 
 # --- stop what is running from $Dir (Windows cannot replace files that are in use) -----------------------------
 function Stop-Aminos {
-    foreach ($t in "Aminos", "Aminos-ERP", "Aminos-Caddy", "Aminos-Orchestrator", "Aminos-AgentHQ") {
+    foreach ($t in "Aminos", "Aminos-ERP", "Aminos-N8n", "Aminos-Caddy", "Aminos-Orchestrator", "Aminos-AgentHQ") {
         Stop-ScheduledTask -TaskName $t -ErrorAction SilentlyContinue
     }
     Get-Process caddy, streamlit, python, node, powershell -ErrorAction SilentlyContinue |
@@ -110,7 +115,7 @@ if ($Online) {
     if ($LASTEXITCODE -ne 0) { throw "Aminos installation failed" }
 }
 Copy-Item "$Bundle\app.py", "$Bundle\saas_app.py" "$Dir\app\" -Force
-Copy-Item "$Bundle\run-app.ps1", "$Bundle\run-erp.ps1", "$Bundle\run-orchestrator.ps1", "$Bundle\run-agent-hq.ps1", "$Bundle\Lancer-Aminos.bat",
+Copy-Item "$Bundle\run-app.ps1", "$Bundle\run-erp.ps1", "$Bundle\run-n8n.ps1", "$Bundle\run-orchestrator.ps1", "$Bundle\run-agent-hq.ps1", "$Bundle\Lancer-Aminos.bat",
           "$Bundle\uninstall.ps1", "$Bundle\update.ps1" "$Dir\" -Force
 if (Test-Path "$Bundle\bootstrap.ps1") { Copy-Item "$Bundle\bootstrap.ps1" "$Dir\" -Force }
 # our own skills (the third-party ones live next to them, managed by `aminos skills`)
@@ -147,7 +152,9 @@ if ($Domain) {
     }
     $ErpPort = 8502
     # multi-user Caddyfiles written by an older version lack the back-office route: they are generated, so regenerate
-    if ($Saas -and (Test-Path "$Dir\caddy\Caddyfile") -and -not (Select-String -Path "$Dir\caddy\Caddyfile" -Pattern "/erp/\*" -Quiet)) {
+    if ($Saas -and (Test-Path "$Dir\caddy\Caddyfile") -and (
+            -not (Select-String -Path "$Dir\caddy\Caddyfile" -Pattern "/erp/\*" -Quiet) -or
+            ($N8n -and -not (Select-String -Path "$Dir\caddy\Caddyfile" -Pattern "/webhook/\*" -Quiet)))) {
         Remove-Item "$Dir\caddy\Caddyfile" -Force
     }
     if (-not (Test-Path "$Dir\caddy\Caddyfile")) {
@@ -161,7 +168,8 @@ if ($Domain) {
             Protect-File "$Dir\FIRST_PASSWORD.txt"
         }
         if ($Saas) {
-            "$Domain {`n`thandle /erp/* {`n`t`treverse_proxy 127.0.0.1:$ErpPort`n`t}`n`thandle {`n`t`treverse_proxy 127.0.0.1:$Port`n`t}`n}`n" |
+            $hook = if ($N8n) { "`thandle /webhook/* {`n`t`treverse_proxy 127.0.0.1:5678`n`t}`n" } else { "" }
+            "$Domain {`n`thandle /erp/* {`n`t`treverse_proxy 127.0.0.1:$ErpPort`n`t}`n$hook`thandle {`n`t`treverse_proxy 127.0.0.1:$Port`n`t}`n}`n" |
                 Set-Content -Encoding ASCII "$Dir\caddy\Caddyfile"
         } else {
             "$Domain {`n$auth`treverse_proxy 127.0.0.1:$Port`n}`n" | Set-Content -Encoding ASCII "$Dir\caddy\Caddyfile"
@@ -194,6 +202,53 @@ foreach ($spec in $Skills) {
     if ($LASTEXITCODE -ne 0) { Write-Host "    not installed (git is required: winget install Git.Git)" }
 }
 
+# --- optional: n8n automation (Node 24 portable + n8n at a pinned version, workflows and credentials imported) -------
+if ($N8n) {
+    Write-Host "==> n8n $N8nVersion"
+    if (-not (Test-Path "$Dir\node24\node.exe")) {
+        $idx = "https://nodejs.org/dist/latest-v24.x"
+        $sums = (Invoke-WebRequest "$idx/SHASUMS256.txt" -UseBasicParsing).Content -split "`n"
+        $line = $sums | Where-Object { $_ -match "node-v24\.[0-9.]+-win-x64\.zip" } | Select-Object -First 1
+        $hash, $zipName = $line.Trim() -split "\s+", 2
+        Invoke-WebRequest "$idx/$zipName" -OutFile "$Dir\node24.zip" -UseBasicParsing
+        if ((Get-FileHash -Algorithm SHA256 "$Dir\node24.zip").Hash.ToLower() -ne $hash.ToLower()) { throw "Node download checksum mismatch" }
+        Expand-Archive "$Dir\node24.zip" -DestinationPath "$Dir\node24-tmp" -Force
+        Move-Item (Get-ChildItem "$Dir\node24-tmp" | Select-Object -First 1).FullName "$Dir\node24" -Force
+        Remove-Item "$Dir\node24-tmp", "$Dir\node24.zip" -Recurse -Force
+    }
+    $env:PATH = "$Dir\node24;$env:PATH"
+    New-Item -ItemType Directory -Force -Path "$Dir\n8n", "$Dir\data\n8n" | Out-Null
+    & "$Dir\node24\npm.cmd" install --prefix "$Dir\n8n" "n8n@$N8nVersion" --no-audit --no-fund --loglevel=error
+    if ($LASTEXITCODE -ne 0) { throw "n8n installation failed" }
+    $publicHost = if ($Domain) { ($Domain -replace "^https?://", "") } else { "localhost" }
+    [ordered]@{ N8N_USER_FOLDER = "$Dir\data\n8n"; N8N_LISTEN_ADDRESS = "127.0.0.1"; N8N_SECURE_COOKIE = "false"; N8N_PROXY_HOPS = "1"
+                WEBHOOK_URL = "https://$publicHost/"; GENERIC_TIMEZONE = "Africa/Casablanca"; N8N_DIAGNOSTICS_ENABLED = "false"
+                N8N_VERSION_NOTIFICATIONS_ENABLED = "false"; N8N_PERSONALIZATION_ENABLED = "false"
+                EXECUTIONS_DATA_PRUNE = "true"; EXECUTIONS_DATA_MAX_AGE = "336"
+                NODES_EXCLUDE = '["n8n-nodes-base.executeCommand","n8n-nodes-base.localFileTrigger","n8n-nodes-base.readWriteFile"]' } |
+        ConvertTo-Json | Set-Content -Encoding ASCII "$Dir\n8n.env.json"
+    if (-not (Test-Path "$Dir\data\n8n\.aminos-imported") -or $N8nReimport) {
+        Write-Host "==> n8n: tokens, credentials and workflows"
+        $dataDir = if (Test-Path "$Dir\saas.env") { ((Get-Content "$Dir\saas.env" | Where-Object { $_ -like "AMINOS_DATA_DIR=*" }) -split "=", 2)[1] } else { "$Dir\data\saas" }
+        $prep = @("n8n", "prepare", "--out", "$Dir\data\n8n-setup", "--data", $dataDir, "--org", "admin", "--erp-url", "http://127.0.0.1:8502", "--app-url", "http://127.0.0.1:$Port")
+        if ($AlertUrl) { $prep += @("--alert-url", $AlertUrl) }
+        & "$Dir\venv\Scripts\aminos.exe" @prep
+        if ($LASTEXITCODE -ne 0) { throw "n8n prepare failed" }
+        Protect-File "$Dir\data\n8n-setup\credentials.json"
+        $env:N8N_USER_FOLDER = "$Dir\data\n8n"; $env:N8N_DIAGNOSTICS_ENABLED = "false"
+        $n8nCli = @("$Dir\n8n\node_modules\n8n\bin\n8n")
+        $ErrorActionPreference = "Continue"      # n8n prints notices on stderr
+        & "$Dir\node24\node.exe" @n8nCli import:credentials --input="$Dir\data\n8n-setup\credentials.json"
+        if ($LASTEXITCODE -ne 0) { throw "n8n credential import failed" }
+        & "$Dir\node24\node.exe" @n8nCli import:workflow --separate --input="$Dir\data\n8n-setup\workflows"
+        if ($LASTEXITCODE -ne 0) { throw "n8n workflow import failed" }
+        $ids = & "$Dir\node24\node.exe" @n8nCli list:workflow --onlyId 2>$null | Where-Object { $_ -match "^[A-Za-z0-9]{8,}$" }
+        foreach ($id in $ids) { & "$Dir\node24\node.exe" @n8nCli publish:workflow --id=$id | Out-Null }
+        $ErrorActionPreference = "Stop"
+        New-Item -ItemType File -Force -Path "$Dir\data\n8n\.aminos-imported" | Out-Null
+    }
+}
+
 # --- run at boot, restart on failure ---------------------------------------------------------------------------
 function Register-AminosTask($name, $exe, $argLine) {
     Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue
@@ -210,6 +265,7 @@ $ps = "powershell.exe"
 $psArgs = { param($script, $more) "-NoProfile -ExecutionPolicy Bypass -File `"$Dir\$script`" -Dir `"$Dir`" $more" }
 Start-Component "Aminos" $ps (& $psArgs "run-app.ps1" "-Port $Port$(if ($Saas) { ' -Saas' })")
 if ($Saas) { Start-Component "Aminos-ERP" $ps (& $psArgs "run-erp.ps1" "-Port 8502") }
+if ($N8n) { Start-Component "Aminos-N8n" $ps (& $psArgs "run-n8n.ps1" "-Port 5678") }
 if ($Domain) { Start-Component "Aminos-Caddy" "$Dir\caddy\caddy.exe" "run --config `"$Dir\caddy\Caddyfile`" --adapter caddyfile" }
 if ($Orchestrator) {
     New-Item -ItemType Directory -Force -Path "C:\orchestrator\logs" | Out-Null
@@ -218,7 +274,7 @@ if ($Orchestrator) {
 if ($Agency -and $nodeOk) { Start-Component "Aminos-AgentHQ" $ps (& $psArgs "run-agent-hq.ps1" "") }
 
 # --- remember the options for -Update --------------------------------------------------------------------------
-[ordered]@{ Port = $Port; Domain = $Domain; Saas = [bool]$Saas; Orchestrator = [bool]$Orchestrator; Agency = [bool]$Agency
+[ordered]@{ Port = $Port; Domain = $Domain; Saas = [bool]$Saas; N8n = [bool]$N8n; Orchestrator = [bool]$Orchestrator; Agency = [bool]$Agency
             NoService = [bool]$NoService; Skills = $Skills; Online = [bool]$Online; Repo = $Repo; Ref = $Ref
             Updated = (Get-Date -Format s) } |
     ConvertTo-Json | Set-Content -Encoding ASCII $StateFile
@@ -237,6 +293,10 @@ if ($Domain) {
 } else {
     Write-Host "URL:   http://127.0.0.1:$Port  (local only: open it from this server, or tunnel: ssh -L ${Port}:127.0.0.1:${Port} user@server)"
     if ($Saas) { Write-Host "User:  admin" }
+}
+if ($N8n) {
+    Write-Host "n8n: editor on http://127.0.0.1:5678 (tunnel or RDP; create the owner account at once). Web form webhook: POST /webhook/aminos-demande with header X-Aminos-Secret (secret in $Dir\data\n8n-setup\credentials.json)."
+    if (-not $AlertUrl) { Write-Host "n8n alerts stay silent until you give -AlertUrl <webhook> -N8nReimport, or set it in the Config node of each workflow." }
 }
 if ($Saas) {
     $erpBase = if ($Domain) { if ($Domain -match '^http') { $Domain } else { "https://$Domain" } } else { "http://127.0.0.1:8502" }

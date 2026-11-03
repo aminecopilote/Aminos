@@ -42,26 +42,76 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install
-        run: sudo bash deploy/ubuntu/install.sh --source "$GITHUB_WORKSPACE" --no-caddy --no-ufw
+        run: sudo bash deploy/ubuntu/install.sh --source "$GITHUB_WORKSPACE" --no-caddy --no-ufw --n8n
       - name: Services healthy, administrator can use the back-office, secrets private
         run: |
-          systemctl is-active aminos aminos-erp
+          systemctl is-active aminos aminos-erp aminos-n8n
           PW=$(sudo grep '^AMINOS_ADMIN_PASSWORD=' /etc/aminos/aminos.env | cut -d= -f2)
           curl -fsS -c jar -H 'Content-Type: application/json' -d "{\"username\":\"admin\",\"password\":\"$PW\"}" http://127.0.0.1:8502/erp/api/login > login.json
           CSRF=$(python3 -c "import json;print(json.load(open('login.json'))['csrf'])")
           curl -fsS -b jar -H 'Content-Type: application/json' -H "X-CSRF-Token: $CSRF" -d '{"name":"CI client"}' http://127.0.0.1:8502/erp/api/clients | grep -q 'CI client'
           test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Content-Type: application/json' -d '{"name":"x"}' http://127.0.0.1:8502/erp/api/clients)" = 401
           test "$(stat -c %a /etc/aminos/aminos.env)" = 640
-          ! ss -ltn | grep -E '0\.0\.0\.0:(8501|8502)'     # nothing listens on a public address
+          ! ss -ltn | grep -E '0\.0\.0\.0:(8501|8502|5678)'     # nothing listens on a public address
+      - name: n8n workflows are active and the intake webhook creates a client and a case
+        run: |
+          SECRET=$(sudo python3 -c "import json;print(next(c['data']['value'] for c in json.load(open('/var/lib/aminos/n8n-setup/credentials.json')) if c['name']=='Aminos secret formulaire'))")
+          for i in $(seq 60); do
+            CODE=$(curl -s -o resp.json -w '%{http_code}' -X POST -H "X-Aminos-Secret: $SECRET" -H 'Content-Type: application/json' \
+              -d '{"name":"CI Form","title":"Acte","src":"ar","tgt":"fr"}' http://127.0.0.1:5678/webhook/aminos-demande)
+            [ "$CODE" = 201 ] && break; sleep 2
+          done
+          test "$CODE" = 201; cat resp.json
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST -H 'X-Aminos-Secret: wrong' -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:5678/webhook/aminos-demande)" = 403
+          curl -fsS -b jar -H 'Content-Type: application/json' http://127.0.0.1:8502/erp/api/clients | grep -q 'CI Form'
+          sudo systemctl is-active aminos-n8n
       - name: Update keeps accounts, then uninstall keeps data
         run: |
           B=$(sudo md5sum /etc/aminos/aminos.env)
           sudo bash deploy/ubuntu/install.sh --update --source "$GITHUB_WORKSPACE" --no-caddy --no-ufw
+          sudo systemctl is-active aminos-n8n
           test "$B" = "$(sudo md5sum /etc/aminos/aminos.env)"
           systemctl is-active aminos aminos-erp
           sudo bash deploy/ubuntu/install.sh --uninstall
           test -d /var/lib/aminos
           ! systemctl is-active aminos
+
+  n8n:
+    # The five workflows against a real n8n: credentials and workflows imported with n8n's CLI, the four scheduled
+    # ones executed once, the intake webhook posted to.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - uses: actions/setup-node@v4
+        with: { node-version: "24" }
+      - run: pip install -e .
+      - run: npm install --prefix "$RUNNER_TEMP/n8n" n8n@2.46.4 --no-audit --no-fund --loglevel=error
+      - run: N8N_BIN="$RUNNER_TEMP/n8n/node_modules/.bin/n8n" python tests/n8n_e2e.py
+
+  docker-n8n:
+    # The Docker route: deploy/n8n-setup.sh builds the images, creates tokens, imports and activates the workflows.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up n8n with compose
+        working-directory: deploy
+        run: |
+          printf 'AMINOS_ADMIN_USER=admin\nAMINOS_ADMIN_PASSWORD=Correct-horse-battery-1\nDOMAIN=localhost\n' > .env
+          bash n8n-setup.sh
+      - name: Webhook creates a client and a case; the editor is not published
+        working-directory: deploy
+        run: |
+          SECRET=$(docker compose run --rm --no-deps aminos python -c "import json;print(next(c['data']['value'] for c in json.load(open('/data/n8n-setup/credentials.json')) if c['name']=='Aminos secret formulaire'))")
+          for i in $(seq 60); do
+            CODE=$(curl -s -o resp.json -w '%{http_code}' -X POST -H "X-Aminos-Secret: $SECRET" -H 'Content-Type: application/json' \
+              -d '{"name":"CI Form","title":"Acte","src":"ar","tgt":"fr"}' http://127.0.0.1:5678/webhook/aminos-demande)
+            [ "$CODE" = 201 ] && break; sleep 2
+          done
+          test "$CODE" = 201; cat resp.json
+          ! ss -ltn | grep -E '0\.0\.0\.0:5678'
+          docker compose --profile n8n logs n8n | tail -5
 
   vendor:
     # Third-party repos at pinned commits, run in isolation. Informational: their failures are not ours.
@@ -131,7 +181,7 @@ jobs:
           $extra = @{}   # a hashtable splats as named parameters; an array would pass "-Saas" as a positional value
           if ("${{ matrix.mode }}" -ne "single") { $extra["Saas"] = $true }
           if ("${{ matrix.mode }}" -eq "full") {
-            $extra["Orchestrator"] = $true; $extra["Agency"] = $true
+            $extra["Orchestrator"] = $true; $extra["Agency"] = $true; $extra["N8n"] = $true
             $extra["Skills"] = @("chatgpt-skills:document-converter-suite")
           }
           .\install.ps1 -Dir C:\Aminos -Domain "http://localhost:8080" -NoService @extra
@@ -171,6 +221,25 @@ jobs:
           if ($c.name -ne "CI client") { throw "client not created" }
           & C:\Aminos\venv\Scripts\aminos.exe superagent selftest
           if ($LASTEXITCODE -ne 0) { throw "superagent self-test failed" }
+      - name: n8n runs with its workflows and the intake webhook works through Caddy (full mode)
+        if: matrix.mode == 'full'
+        shell: powershell
+        run: |
+          $ok = $false
+          foreach ($i in 1..80) { try { if ((Invoke-WebRequest http://127.0.0.1:5678/healthz -UseBasicParsing).StatusCode -eq 200) { $ok = $true; break } } catch { }; Start-Sleep 3 }
+          if (-not $ok) { Get-Content C:\Aminos\logs\n8n.log -ErrorAction SilentlyContinue | Select-Object -Last 40; throw "n8n not healthy" }
+          $secret = ((Get-Content C:\Aminos\data\n8n-setup\credentials.json -Raw | ConvertFrom-Json) | Where-Object { $_.name -eq "Aminos secret formulaire" }).data.value
+          $created = $false
+          foreach ($i in 1..40) {
+            try {
+              $r = Invoke-RestMethod http://localhost:8080/webhook/aminos-demande -Method Post -ContentType application/json -Headers @{ "X-Aminos-Secret" = $secret } `
+                     -Body '{"name":"CI Form","title":"Acte","src":"ar","tgt":"fr"}'
+              if ($r.ok) { $created = $true; break }
+            } catch { }
+            Start-Sleep 3
+          }
+          if (-not $created) { Get-Content C:\Aminos\logs\n8n.log -ErrorAction SilentlyContinue | Select-Object -Last 40; throw "intake webhook failed" }
+          try { Invoke-WebRequest http://localhost:8080/webhook/aminos-demande -Method Post -ContentType application/json -Headers @{ "X-Aminos-Secret" = "wrong" } -Body "{}" -UseBasicParsing | Out-Null; throw "wrong secret accepted" } catch { if ($_.Exception.Message -eq "wrong secret accepted") { throw } }
       - name: Single-user mode asks for the shared password
         if: matrix.mode == 'single'
         shell: powershell

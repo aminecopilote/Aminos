@@ -25,7 +25,10 @@ from wsgiref.simple_server import WSGIRequestHandler, WSGIServer, make_server
 from socketserver import ThreadingMixIn
 
 from ..saas import AuthError, SaaSStore
+from ..saas.store import User
+from . import system
 from .store import ErpError, ErpStore
+from .tokens import TokenStore
 
 STATIC = Path(__file__).parent / "static"
 STATIC_TYPES = {"bootstrap.min.css": "text/css", "bootstrap.bundle.min.js": "text/javascript", "app.js": "text/javascript",
@@ -53,6 +56,8 @@ class HttpError(Exception):
 class ErpApp:
     def __init__(self, data_dir: str | Path, session_minutes: int = 480, cookie_secure: bool | None = None):
         self.store = SaaSStore(data_dir)
+        self.data_dir = Path(data_dir)
+        self.tokens = TokenStore(data_dir)
         self.ttl = session_minutes * 60
         self.cookie_secure = cookie_secure
         sf = Path(data_dir) / "erp-secret"
@@ -149,9 +154,14 @@ class ErpApp:
             cookie = f"{COOKIE}={token}; Path=/erp; HttpOnly; SameSite=Strict; Max-Age={self.ttl}" + ("; Secure" if secure else "")
             return self._json({"user": user.username, "org": user.org, "role": user.role, "csrf": csrf}, 200, [("Set-Cookie", cookie)])
 
+        bearer = environ.get("HTTP_AUTHORIZATION", "")
+        if bearer:
+            return self.handle_token(environ, method, path, bearer)
         user, csrf = self.session(environ)
         if not user:
             raise HttpError(401, "non connecté")
+        if path.startswith("/erp/api/system/"):
+            raise HttpError(403, "réservé aux jetons système")
         if method != "GET":
             if not hmac.compare_digest(environ.get("HTTP_X_CSRF_TOKEN", ""), csrf):
                 raise HttpError(403, "jeton CSRF invalide")
@@ -164,6 +174,33 @@ class ErpApp:
         if m and method == "GET":
             return 200, [("Content-Type", "text/html; charset=utf-8")], render_document(erp.document(int(m.group(1))), user.org).encode()
         return self.api(erp, user, method, path, environ)
+
+    def handle_token(self, environ, method: str, path: str, header: str):
+        """Automation access: no cookie, no CSRF (the credential is the header itself), scope enforced here."""
+        if not header.lower().startswith("bearer "):
+            raise HttpError(401, "jeton invalide")
+        tok = self.tokens.verify(header[7:].strip())
+        if not tok:
+            raise HttpError(401, "jeton invalide")
+        scope = tok["scope"]
+        if path.startswith("/erp/api/system/"):
+            if scope != "system":
+                raise HttpError(403, "portée insuffisante")
+            if path == "/erp/api/system/status" and method == "GET":
+                return self._json(system.status(self.data_dir))
+            if path == "/erp/api/system/jobs" and method == "GET":
+                return self._json(system.jobs(self.data_dir))
+            if path == "/erp/api/system/backup" and method == "POST":
+                return self._json(system.backup(self.data_dir))
+            raise HttpError(404, "introuvable")
+        if scope == "system":
+            raise HttpError(403, "un jeton système n'accède pas aux données d'un cabinet")
+        if method not in ("GET", "POST", "PUT") or (method != "GET" and scope == "read"):
+            raise HttpError(403, "portée insuffisante")
+        if not path.startswith("/erp/api/") or path in ("/erp/api/login", "/erp/api/logout"):
+            raise HttpError(404, "introuvable")
+        user = User(f"token:{tok['label'] or tok['id']}", tok["org"], "user", True, 0, 0, False)
+        return self.api(self.erp(tok["org"]), user, method, path, environ)
 
     def api(self, erp: ErpStore, user, method: str, path: str, environ):
         q = {k: v[0] for k, v in __import__("urllib.parse", fromlist=["parse_qs"]).parse_qs(environ.get("QUERY_STRING", "")).items()}
@@ -273,8 +310,32 @@ def main(argv=None) -> int:
     import argparse
     ap = argparse.ArgumentParser(prog="python -m aminos.erp")
     ap.add_argument("--data", default=os.environ.get("AMINOS_DATA_DIR", "saas-data"))
-    ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=int(os.environ.get("AMINOS_ERP_PORT", "8502")))
+    sub = ap.add_subparsers(dest="cmd")
+    sv = sub.add_parser("serve", help="démarrer le back-office (défaut)")
+    for p in (ap, sv):
+        p.add_argument("--host", default="127.0.0.1")
+        p.add_argument("--port", type=int, default=int(os.environ.get("AMINOS_ERP_PORT", "8502")))
+    tk = sub.add_parser("token", help="jetons d'API pour l'automatisation (n8n) : create | list | revoke")
+    tk.add_argument("action", choices=["create", "list", "revoke"])
+    tk.add_argument("--scope", choices=["read", "write", "system"], default="read")
+    tk.add_argument("--org", default="")
+    tk.add_argument("--label", default="")
+    tk.add_argument("--id", type=int, default=0)
     a = ap.parse_args(argv)
+    if a.cmd == "token":
+        ts = TokenStore(a.data)
+        if a.action == "create":
+            try:
+                print(ts.create(a.scope, a.org, a.label))
+            except ValueError as e:
+                print(f"erreur : {e}", file=sys.stderr)
+                return 2
+            print("Jeton affiché une seule fois : conservez-le.", file=sys.stderr)
+        elif a.action == "list":
+            for t in ts.list():
+                print(f"{t['id']}\t{t['scope']}\t{t['org'] or '*'}\t{t['label']}\t{'révoqué' if t['revoked'] else 'actif'}")
+        else:
+            print("révoqué" if ts.revoke(a.id) else "introuvable")
+        return 0
     serve(a.data, a.host, a.port)
     return 0

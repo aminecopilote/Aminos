@@ -42,3 +42,7 @@ Différence avec le paquet hors ligne : les dépendances viennent de PyPI au mom
 ## Back-office et superagent (mode `-Saas`)
 
 Avec `-Saas`, la tâche planifiée **Aminos-ERP** démarre aussi le back-office (clients, dossiers, devis, factures) sur `http://127.0.0.1:8502/erp/`, et Caddy le publie sous `https://votre.domaine/erp/` si vous donnez `-Domain`. Mêmes identifiants que l'application. Le **superagent** est l'onglet « Superagent » de l'application ; en ligne de commande : `C:\Aminos\venv\Scripts\aminos.exe superagent selftest` (essai complet), puis voir `deploy/SUPERAGENT.md`. Les pages traduites en PDF demandent LibreOffice (`winget install TheDocumentFoundation.LibreOffice`) ; sans lui, la certification ne comprend que la page de certification. Logs : `C:\Aminos\logs\erp.log`.
+
+## Automatisation n8n (option `-N8n`)
+
+`.\install.ps1 -Saas -N8n -AlertUrl https://votre-webhook` (ou avec `bootstrap.ps1`) télécharge Node 24 portable (somme SHA-256 vérifiée), installe n8n 2.46.4 dans `C:\Aminos\n8n`, importe les cinq workflows et démarre la tâche `Aminos-N8n` sur `127.0.0.1:5678` (éditeur : bureau à distance ou tunnel ; seul `/webhook/*` passe par Caddy). Détails : `deploy/N8N.md`. Logs : `C:\Aminos\logs\n8n.log`.

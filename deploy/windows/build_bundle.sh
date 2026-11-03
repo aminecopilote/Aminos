@@ -11,7 +11,7 @@ python3 -m pip wheel -q --no-deps -w "$OUT/wheelhouse" "git+https://github.com/S
 python3 -m pip download -q --only-binary=:all: --platform win_amd64 --python-version 3.12 --implementation cp --abi cp312 \
   -d "$OUT/wheelhouse" -r deploy/windows/requirements.txt
 
-cp app.py saas_app.py deploy/windows/{install.ps1,update.ps1,run-app.ps1,run-erp.ps1,run-orchestrator.ps1,run-agent-hq.ps1,uninstall.ps1,Lancer-Aminos.bat,requirements.txt,LISEZ-MOI.md} "$OUT/"
+cp app.py saas_app.py deploy/windows/{install.ps1,update.ps1,run-app.ps1,run-erp.ps1,run-n8n.ps1,run-orchestrator.ps1,run-agent-hq.ps1,uninstall.ps1,Lancer-Aminos.bat,requirements.txt,LISEZ-MOI.md} "$OUT/"
 
 # own skills and the chef d'agence notes
 mkdir -p "$OUT/skills" "$OUT/agency"

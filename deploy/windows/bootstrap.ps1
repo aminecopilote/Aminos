@@ -12,7 +12,8 @@ param(
     [string]$Dir = "C:\Aminos",
     [int]$Port = 8501,
     [string]$Domain = "",
-    [switch]$NoService, [switch]$Saas, [switch]$Orchestrator, [switch]$Agency, [switch]$Update,
+    [switch]$NoService, [switch]$Saas, [switch]$Orchestrator, [switch]$Agency, [switch]$Update, [switch]$N8n, [switch]$N8nReimport,
+    [string]$AlertUrl = "",
     [string[]]$Skills = @()
 )
 $ErrorActionPreference = "Stop"
@@ -45,7 +46,7 @@ try {
     New-Item -ItemType Directory -Force -Path $b, "$b\agency" | Out-Null
     $w = "$src\deploy\windows"
     Copy-Item "$src\app.py", "$src\saas_app.py" $b
-    Copy-Item "$w\install.ps1", "$w\update.ps1", "$w\bootstrap.ps1", "$w\run-app.ps1", "$w\run-erp.ps1", "$w\run-orchestrator.ps1", "$w\run-agent-hq.ps1",
+    Copy-Item "$w\install.ps1", "$w\update.ps1", "$w\bootstrap.ps1", "$w\run-app.ps1", "$w\run-erp.ps1", "$w\run-n8n.ps1", "$w\run-orchestrator.ps1", "$w\run-agent-hq.ps1",
               "$w\uninstall.ps1", "$w\Lancer-Aminos.bat", "$w\requirements.txt" $b
     Copy-Item "$src\skills" "$b\skills" -Recurse
     Copy-Item "$src\agency\AGENTS.md", "$src\agency\MEMORY-orchestrateur.md", "$src\agency\start-agent-hq.mjs" "$b\agency"
@@ -60,7 +61,8 @@ try {
     $p = @{ Dir = $Dir; Port = $Port; Online = $true; SourceDir = $src; Repo = $AminosRepo; Ref = $AminosRef }
     if ($Domain) { $p.Domain = $Domain }
     if ($Skills.Count) { $p.Skills = $Skills }
-    foreach ($sw in "NoService", "Saas", "Orchestrator", "Agency", "Update") { if ((Get-Variable $sw).Value) { $p[$sw] = $true } }
+    if ($AlertUrl) { $p.AlertUrl = $AlertUrl }
+    foreach ($sw in "NoService", "Saas", "Orchestrator", "Agency", "Update", "N8n", "N8nReimport") { if ((Get-Variable $sw).Value) { $p[$sw] = $true } }
     & "$b\install.ps1" @p
     if ($LASTEXITCODE -ne $null -and $LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
