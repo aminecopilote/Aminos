@@ -19,7 +19,8 @@ dc run --rm --no-deps -u root --entrypoint sh n8n -c '
   set -e
   n8n import:credentials --input=/import/n8n-setup/credentials.json
   n8n import:workflow --separate --input=/import/n8n-setup/workflows
-  for id in $(n8n list:workflow --onlyId | grep -E "^[A-Za-z0-9]{8,}$"); do n8n publish:workflow --id="$id" >/dev/null; done
+  for id in $(cat /import/n8n-setup/workflow-ids.txt); do n8n publish:workflow --id="$id"; done
+  n8n list:workflow --active=true
   chown -R node:node /home/node/.n8n'
 dc up -d n8n
 for i in $(seq 60); do dc exec -T n8n wget -qO- http://127.0.0.1:5678/healthz >/dev/null 2>&1 && break; sleep 2; done

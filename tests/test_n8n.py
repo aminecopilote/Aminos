@@ -34,6 +34,11 @@ class N8nTests(unittest.TestCase):
                         self.assertIn(t["node"], names)
             self.assertFalse(f["active"])
 
+    def test_workflow_ids_file_matches_the_workflows(self):
+        ids = (Path(self.res["credentials"]).parent / "workflow-ids.txt").read_text().split()
+        self.assertEqual(sorted(ids), sorted(f["id"] for f in self.flows()))
+        self.assertEqual(len(set(ids)), 5)
+
     def test_no_secret_inside_workflows(self):
         text = "".join(Path(p).read_text(encoding="utf-8") for p in self.res["workflows"])
         self.assertNotIn("amn_", text)

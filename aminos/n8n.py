@@ -276,6 +276,9 @@ def prepare(out_dir: str | Path, data_dir: str | Path, org: str, erp_url: str, a
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(creds, fh, indent=2)
     paths = write_workflows(out / "workflows", erp_url, app_url, alert_url)
+    # the installers publish exactly these workflows: no parsing of the CLI's listing (its format is not a contract)
+    (out / "workflow-ids.txt").write_text("\n".join(json.loads(p.read_text(encoding="utf-8"))["id"] for p in paths) + "\n",
+                                         encoding="utf-8")
     return {"credentials": str(cred_path), "workflows": [str(p) for p in paths], "intake_secret": secret}
 
 

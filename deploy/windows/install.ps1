@@ -242,8 +242,10 @@ if ($N8n) {
         if ($LASTEXITCODE -ne 0) { throw "n8n credential import failed" }
         & "$Dir\node24\node.exe" @n8nCli import:workflow --separate --input="$Dir\data\n8n-setup\workflows"
         if ($LASTEXITCODE -ne 0) { throw "n8n workflow import failed" }
-        $ids = & "$Dir\node24\node.exe" @n8nCli list:workflow --onlyId 2>$null | Where-Object { $_ -match "^[A-Za-z0-9]{8,}$" }
-        foreach ($id in $ids) { & "$Dir\node24\node.exe" @n8nCli publish:workflow --id=$id | Out-Null }
+        foreach ($id in (Get-Content "$Dir\data\n8n-setup\workflow-ids.txt" | Where-Object { $_.Trim() })) {
+            & "$Dir\node24\node.exe" @n8nCli publish:workflow --id=$($id.Trim())
+            if ($LASTEXITCODE -ne 0) { throw "n8n publish failed for $id" }
+        }
         $ErrorActionPreference = "Stop"
         New-Item -ItemType File -Force -Path "$Dir\data\n8n\.aminos-imported" | Out-Null
     }

@@ -135,7 +135,7 @@ N8NENV
     N8NRUN=(runuser -u aminos -- env N8N_USER_FOLDER="$DATA/n8n" N8N_DIAGNOSTICS_ENABLED=false HOME="$DATA" "$NODE_BIN" "$APP/n8n/node_modules/n8n/bin/n8n")
     "${N8NRUN[@]}" import:credentials --input="$DATA/n8n-setup/credentials.json"
     "${N8NRUN[@]}" import:workflow --separate --input="$DATA/n8n-setup/workflows"
-    for id in $("${N8NRUN[@]}" list:workflow --onlyId | grep -E '^[A-Za-z0-9]{8,}$'); do "${N8NRUN[@]}" publish:workflow --id="$id" >/dev/null; done
+    for id in $(cat "$DATA/n8n-setup/workflow-ids.txt"); do "${N8NRUN[@]}" publish:workflow --id="$id"; done
     touch "$DATA/n8n/.aminos-imported"; chown aminos:aminos "$DATA/n8n/.aminos-imported"
   fi
 fi
