@@ -27,6 +27,9 @@ class Provider:
     model: str            # default model
     data_policy: str      # "local" | "may-train" | "unverified"
     note: str = ""
+    env_base: str = ""    # optional environment variable overriding base_url
+    alt_keys: tuple = ()  # other environment variables accepted for the key
+    temperature: bool = True  # False: let the server choose (reasoning models that fix it)
 
 
 PROVIDERS: dict[str, Provider] = {p.name: p for p in [
@@ -44,6 +47,9 @@ PROVIDERS: dict[str, Provider] = {p.name: p for p in [
              "nvidia/nemotron-3-super-120b-a12b", "unverified", "40 RPM"),
     Provider("huggingface", "https://router.huggingface.co/v1", "HF_TOKEN",
              "meta-llama/Llama-3.1-8B-Instruct", "unverified", "Crédit mensuel très limité"),
+    Provider("kimi", "https://api.moonshot.ai/v1", "MOONSHOT_API_KEY", "kimi-k3", "unverified",
+             "Kimi K3 (Moonshot AI), raisonnement toujours actif. Clés chinoises : KIMI_BASE_URL=https://api.moonshot.cn/v1",
+             env_base="KIMI_BASE_URL", alt_keys=("KIMI_API_KEY",), temperature=False),
     Provider("ovh", "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1", "", "gpt-oss-120b", "unverified",
              "Hébergé dans l'UE, anonyme, 2 RPM par IP"),
 ]}
@@ -64,14 +70,21 @@ def openai_compatible_chat(provider: str | Provider, model: str | None = None, m
         raise PermissionError(
             f"« {p.name} » envoie le document à un tiers ({p.data_policy}). Utilisez un document non confidentiel "
             f"et --allow-free-tier, ou le fournisseur local « ollama ».")
-    key = os.environ.get(p.env_key, "") if p.env_key else ""
+    key = next((os.environ[k] for k in (p.env_key, *p.alt_keys) if k and os.environ.get(k)), "")
     if p.env_key and not key:
         raise RuntimeError(f"{p.env_key} is not set (clé API {p.name})")
-    url = p.base_url.rstrip("/") + "/chat/completions"
+    base = (os.environ.get(p.env_base) if p.env_base else "") or p.base_url
+    url = base.rstrip("/") + "/chat/completions"
+    effort = os.environ.get("KIMI_REASONING_EFFORT", "") if p.name == "kimi" else ""  # low | high | max
 
     def chat(messages: list[dict], system: str) -> str:
-        body = json.dumps({"model": model or p.model, "temperature": temperature, "max_tokens": max_tokens,
-                           "messages": [{"role": "system", "content": system}, *messages]}).encode()
+        payload = {"model": model or p.model, "max_tokens": max_tokens,
+                   "messages": [{"role": "system", "content": system}, *messages]}
+        if p.temperature:
+            payload["temperature"] = temperature
+        if effort:
+            payload["reasoning_effort"] = effort
+        body = json.dumps(payload).encode()
         headers = {"Content-Type": "application/json"}
         if key:
             headers["Authorization"] = f"Bearer {key}"

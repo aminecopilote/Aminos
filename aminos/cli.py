@@ -56,7 +56,8 @@ def _cmd_providers(a) -> int:
     from .providers import PROVIDERS
     import os
     for p in PROVIDERS.values():
-        ready = "prêt" if not p.env_key or os.environ.get(p.env_key) else f"clé {p.env_key} absente"
+        ready = "prêt" if not p.env_key or any(os.environ.get(k) for k in (p.env_key, *p.alt_keys)) \
+            else f"clé {p.env_key} absente"
         print(f"{p.name:12} {p.data_policy:10} {p.model:42} {ready}  {p.note}")
     return 0
 
