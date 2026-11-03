@@ -109,7 +109,13 @@ jobs:
               -d '{"name":"CI Form","title":"Acte","src":"ar","tgt":"fr"}' http://127.0.0.1:5678/webhook/aminos-demande)
             [ "$CODE" = 201 ] && break; sleep 2
           done
-          test "$CODE" = 201; cat resp.json
+          if [ "$CODE" != 201 ]; then
+            echo "last HTTP code: $CODE"; cat resp.json || true
+            docker compose --profile n8n exec -T n8n n8n list:workflow --active=true || true
+            docker compose --profile n8n logs --tail 60 n8n
+            exit 1
+          fi
+          cat resp.json
           ! ss -ltn | grep -E '0\.0\.0\.0:5678'
           docker compose --profile n8n logs n8n | tail -5
 

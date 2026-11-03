@@ -24,7 +24,10 @@ N8N = os.environ.get("N8N_BIN", "n8n")
 tmp = Path(tempfile.mkdtemp())
 data, home = tmp / "data", tmp / "n8nhome"
 env = {**os.environ, "N8N_USER_FOLDER": str(home), "N8N_DIAGNOSTICS_ENABLED": "false", "N8N_PORT": "5678",
-       "N8N_LISTEN_ADDRESS": "127.0.0.1", "N8N_SECURE_COOKIE": "false", "N8N_VERSION_NOTIFICATIONS_ENABLED": "false"}
+       "N8N_LISTEN_ADDRESS": "127.0.0.1", "N8N_SECURE_COOKIE": "false", "N8N_VERSION_NOTIFICATIONS_ENABLED": "false",
+       # the production settings of the installers: a public webhook URL behind one proxy, shell and file nodes disabled
+       "WEBHOOK_URL": "https://localhost/", "N8N_PROXY_HOPS": "1",
+       "NODES_EXCLUDE": '["n8n-nodes-base.executeCommand","n8n-nodes-base.localFileTrigger","n8n-nodes-base.readWriteFile"]'}
 alerts: list[dict] = []
 
 
