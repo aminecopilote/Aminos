@@ -102,8 +102,12 @@ if [ "$N8N" -eq 1 ]; then
     echo "deb [signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" > /etc/apt/sources.list.d/nodesource.list
     apt-get update -qq && apt-get install -y -qq nodejs >/dev/null
   fi
+  # an older Node earlier in PATH (/usr/local/bin on some images) must not run n8n or compile its native modules
+  NODE_BIN="$(command -v node)"; "$NODE_BIN" -v | grep -q '^v24' || NODE_BIN=/usr/bin/node
+  "$NODE_BIN" -v | grep -q '^v24' || { echo "Node 24 not found ($("$NODE_BIN" -v 2>&1))" >&2; exit 1; }
+  echo "$NODE_BIN" > /etc/aminos/node
   mkdir -p "$APP/n8n" "$DATA/n8n"
-  npm install --prefix "$APP/n8n" "n8n@$N8N_VERSION" --force --no-audit --no-fund --loglevel=error
+  PATH="$(dirname "$NODE_BIN"):$PATH" npm install --prefix "$APP/n8n" "n8n@$N8N_VERSION" --force --no-audit --no-fund --loglevel=error
   chown -R aminos:aminos "$APP/n8n" "$DATA/n8n"
   PUBLIC="${DOMAIN:-localhost}"
   cat > /etc/aminos/n8n.env <<N8NENV
@@ -128,7 +132,7 @@ N8NENV
     ARGS=(--out "$DATA/n8n-setup" --data "$DATA/saas" --org admin --erp-url http://127.0.0.1:8502 --app-url http://127.0.0.1:8501)
     [ -n "$ALERT" ] && ARGS+=(--alert-url "$ALERT")
     runuser -u aminos -- "$APP/venv/bin/aminos" n8n prepare "${ARGS[@]}"
-    N8NRUN=(runuser -u aminos -- env N8N_USER_FOLDER="$DATA/n8n" N8N_DIAGNOSTICS_ENABLED=false HOME="$DATA" "$APP/n8n/node_modules/.bin/n8n")
+    N8NRUN=(runuser -u aminos -- env N8N_USER_FOLDER="$DATA/n8n" N8N_DIAGNOSTICS_ENABLED=false HOME="$DATA" "$NODE_BIN" "$APP/n8n/node_modules/n8n/bin/n8n")
     "${N8NRUN[@]}" import:credentials --input="$DATA/n8n-setup/credentials.json"
     "${N8NRUN[@]}" import:workflow --separate --input="$DATA/n8n-setup/workflows"
     for id in $("${N8NRUN[@]}" list:workflow --onlyId | grep -E '^[A-Za-z0-9]{8,}$'); do "${N8NRUN[@]}" publish:workflow --id="$id" >/dev/null; done
@@ -168,7 +172,7 @@ UNIT
 unit aminos "Aminos translation app" "$APP/venv/bin/streamlit run $APP/src/saas_app.py --server.address=127.0.0.1 --server.port=8501 --server.headless=true --browser.gatherUsageStats=false --server.maxUploadSize=50"
 unit aminos-erp "Aminos back-office" "$APP/venv/bin/python -m aminos.erp --host 127.0.0.1 --port 8502"
 if [ "$N8N" -eq 1 ]; then
-  unit aminos-n8n "Aminos automation (n8n)" "$APP/n8n/node_modules/.bin/n8n start"
+  unit aminos-n8n "Aminos automation (n8n)" "$(cat /etc/aminos/node) $APP/n8n/node_modules/n8n/bin/n8n start"
   sed -i "s#^EnvironmentFile=.*#EnvironmentFile=/etc/aminos/n8n.env#" /etc/systemd/system/aminos-n8n.service
   sed -i "/^ReadWritePaths/s#.*#ReadWritePaths=$DATA#" /etc/systemd/system/aminos-n8n.service
 fi
