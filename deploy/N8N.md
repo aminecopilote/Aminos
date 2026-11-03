@@ -43,4 +43,5 @@ Les identifiants n8n sont chiffrés avec une clé générée au premier démarra
 
 - Testé : chaque workflow importé et exécuté dans n8n 2.46.4 contre le vrai back-office (alertes reçues, sauvegarde vérifiée, client et dossier créés par le webhook), et les trois installateurs en CI. Non testé : l'envoi vers un vrai Slack/Discord, la publication derrière un vrai nom de domaine, une charge réelle.
 - Le webhook de formulaire est public (protégé par le secret) : mettez-le derrière un formulaire qui n'expose pas le secret au navigateur (appel depuis votre serveur web), sinon n'importe quel visiteur pourrait le copier.
+- `npm install n8n` échoue avec EBADPLATFORM (dépendance optionnelle d'une autre plateforme déclarée comme obligatoire) : les installateurs utilisent `--force`, ce qui est sans effet sur les paquets de votre plateforme.
 - Une seule instance n8n, sans file d'attente ni haute disponibilité.

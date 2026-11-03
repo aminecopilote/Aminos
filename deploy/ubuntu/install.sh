@@ -103,7 +103,7 @@ if [ "$N8N" -eq 1 ]; then
     apt-get update -qq && apt-get install -y -qq nodejs >/dev/null
   fi
   mkdir -p "$APP/n8n" "$DATA/n8n"
-  npm install --prefix "$APP/n8n" "n8n@$N8N_VERSION" --no-audit --no-fund --loglevel=error
+  npm install --prefix "$APP/n8n" "n8n@$N8N_VERSION" --force --no-audit --no-fund --loglevel=error
   chown -R aminos:aminos "$APP/n8n" "$DATA/n8n"
   PUBLIC="${DOMAIN:-localhost}"
   cat > /etc/aminos/n8n.env <<N8NENV

@@ -87,7 +87,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: "24" }
       - run: pip install -e .
-      - run: npm install --prefix "$RUNNER_TEMP/n8n" n8n@2.46.4 --no-audit --no-fund --loglevel=error
+      - run: npm install --prefix "$RUNNER_TEMP/n8n" n8n@2.46.4 --force --no-audit --no-fund --loglevel=error
       - run: N8N_BIN="$RUNNER_TEMP/n8n/node_modules/.bin/n8n" python tests/n8n_e2e.py
 
   docker-n8n:

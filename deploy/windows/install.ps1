@@ -218,7 +218,7 @@ if ($N8n) {
     }
     $env:PATH = "$Dir\node24;$env:PATH"
     New-Item -ItemType Directory -Force -Path "$Dir\n8n", "$Dir\data\n8n" | Out-Null
-    & "$Dir\node24\npm.cmd" install --prefix "$Dir\n8n" "n8n@$N8nVersion" --no-audit --no-fund --loglevel=error
+    & "$Dir\node24\npm.cmd" install --prefix "$Dir\n8n" "n8n@$N8nVersion" --force --no-audit --no-fund --loglevel=error
     if ($LASTEXITCODE -ne 0) { throw "n8n installation failed" }
     $publicHost = if ($Domain) { ($Domain -replace "^https?://", "") } else { "localhost" }
     [ordered]@{ N8N_USER_FOLDER = "$Dir\data\n8n"; N8N_LISTEN_ADDRESS = "127.0.0.1"; N8N_SECURE_COOKIE = "false"; N8N_PROXY_HOPS = "1"
