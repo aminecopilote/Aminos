@@ -4,9 +4,10 @@
 # Options (after `bash -s --`):
 #   --ref BRANCH        branch of the Aminos repository holding this installer (default: main)
 #   --home DIR          install folder (default: ~/aminos-suite)
-#   --no-system         do not install system packages (git, compiler, Python venv, libomp)
+#   --no-system         do not install system packages (git, C++ compiler, Python venv)
+#   --models auto|all|none|gemma3-1b,phi4-mini,mistral-small-24b,mixtral-8x7b   (default auto: what fits in RAM)
 #   --only a,b  --skip a,b  --with agents  --no-tests   passed to the suite installer
-# Projects: aminos, eka, jeu, atelier, kimi (Kimi K3 in C), agents (optional).
+# Projects: aminos, eka, jeu, atelier, llama (llama.cpp compiled from source), agents (optional).
 set -euo pipefail
 
 REF="${AMINOS_SUITE_REF:-main}"
@@ -47,13 +48,7 @@ case "$(uname -s)" in
       xcode-select --install || true
       exit 1
     fi
-    if [ "$SYSTEM" = 1 ]; then
-      if command -v brew >/dev/null; then
-        brew list libomp >/dev/null 2>&1 || brew install libomp     # OpenMP for the Kimi K3 engine
-      else
-        say "Homebrew not found: the Kimi K3 engine needs it (brew install libomp). Everything else installs."
-      fi
-    fi ;;
+    ;;   # Apple's command line tools give git and clang; CMake and Ninja come from pip
   *) say "unsupported system $(uname -s): on Windows use install.ps1"; exit 1 ;;
 esac
 command -v git >/dev/null || { say "git is required"; exit 1; }

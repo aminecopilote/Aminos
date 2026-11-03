@@ -1,0 +1,53 @@
+name: suite-install
+# Runs the one-command installer on Ubuntu, macOS and Windows: every project, llama.cpp compiled
+# from source, Gemma 3 1B downloaded (SHA-256 checked), one generation and one API call.
+on:
+  push:
+    paths: ["install.sh", "install.ps1", "suite/**", "aminos/**", "tests/**", ".github/workflows/suite.yml"]
+  workflow_dispatch:
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: python -m unittest discover -s tests -v
+
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install (Ubuntu / macOS)
+        if: runner.os != 'Windows'
+        run: bash install.sh --ref "$GITHUB_REF_NAME" --models gemma3-1b
+
+      - name: install (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: '& .\install.ps1 -Ref $env:GITHUB_REF_NAME -Models gemma3-1b'
+
+      - name: launcher and local model API
+        shell: bash
+        run: |
+          set -eu
+          S="$HOME/aminos-suite/bin/aminos-suite"; [ -f "$S" ] || S="$S.cmd"
+          [ -f "$S" ] || S="$USERPROFILE/aminos-suite/bin/aminos-suite.cmd"
+          "$S" list
+          ( "$S" llm serve gemma3-1b > server.log 2>&1 & )
+          for i in $(seq 1 90); do curl -sf http://127.0.0.1:8090/health >/dev/null && break; sleep 2; done
+          curl -sf http://127.0.0.1:8090/v1/chat/completions -H 'Content-Type: application/json' \
+            -d '{"messages":[{"role":"user","content":"Say hello in French."}],"max_tokens":16}' | tee reply.json
+          grep -q '"content"' reply.json || { cat server.log; exit 1; }
+
+      - name: show summary
+        if: always()
+        shell: bash
+        run: cat "$HOME/aminos-suite/suite.json" 2>/dev/null || cat "$USERPROFILE/aminos-suite/suite.json" 2>/dev/null || true

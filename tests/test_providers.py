@@ -37,23 +37,17 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(seen["auth"], "Bearer k")
         self.assertEqual(seen["body"]["messages"][0], {"role": "system", "content": "sys"})
 
-    def test_kimi_k3(self):
+    def test_llamacpp_local(self):
         seen = {}
 
         def urlopen(req, timeout=0):
-            seen["url"], seen["auth"], seen["body"] = req.full_url, req.get_header("Authorization"), json.loads(req.data)
+            seen["url"] = req.full_url
             return fake_response("Paris")
-        env = {"KIMI_API_KEY": "k3", "KIMI_BASE_URL": "https://api.moonshot.cn/v1", "KIMI_REASONING_EFFORT": "low"}
-        with mock.patch.dict(os.environ, env, clear=True), mock.patch("urllib.request.urlopen", urlopen):
-            with self.assertRaises(PermissionError):
-                openai_compatible_chat("kimi")
-            chat = build_chat("kimi", allow_remote=True)
+        with mock.patch.dict(os.environ, {"LLAMACPP_BASE_URL": "http://127.0.0.1:9000/v1"}, clear=True), \
+                mock.patch("urllib.request.urlopen", urlopen):
+            chat = build_chat("llamacpp")  # local: no consent flag, no key
             self.assertEqual(chat([{"role": "user", "content": "capitale ?"}], "sys"), "Paris")
-        self.assertEqual(seen["url"], "https://api.moonshot.cn/v1/chat/completions")
-        self.assertEqual(seen["auth"], "Bearer k3")
-        self.assertEqual(seen["body"]["model"], "kimi-k3")
-        self.assertEqual(seen["body"]["reasoning_effort"], "low")
-        self.assertNotIn("temperature", seen["body"])
+        self.assertEqual(seen["url"], "http://127.0.0.1:9000/v1/chat/completions")
 
     def test_local_needs_no_consent_nor_key(self):
         with mock.patch("urllib.request.urlopen", lambda r, timeout=0: fake_response("ok")):

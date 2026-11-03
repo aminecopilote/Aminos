@@ -2,14 +2,15 @@
 #   irm https://raw.githubusercontent.com/aminecopilote/Aminos/main/install.ps1 | iex
 # With options:
 #   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/aminecopilote/Aminos/main/install.ps1))) -Ref main -With agents
-# Options: -Ref BRANCH, -SuiteHome DIR, -Only a,b, -Skip a,b, -With agents, -NoTests, -NoSystem
-# Projects: aminos, eka, jeu, atelier, kimi (Kimi K3 in C, built with MSYS2), agents (optional).
+# Options: -Ref BRANCH, -SuiteHome DIR, -Only a,b, -Skip a,b, -With agents, -Models auto|all|none|names, -NoTests, -NoSystem
+# Projects: aminos, eka, jeu, atelier, llama (llama.cpp compiled with MSYS2's GCC), agents (optional).
 param(
   [string]$Ref = $(if ($env:AMINOS_SUITE_REF) { $env:AMINOS_SUITE_REF } else { "main" }),
   [string]$SuiteHome = $(if ($env:AMINOS_SUITE_HOME) { $env:AMINOS_SUITE_HOME } else { Join-Path $HOME "aminos-suite" }),
   [string]$Only = "",
   [string]$Skip = "",
   [string]$With = "",
+  [string]$Models = $(if ($env:AMINOS_SUITE_MODELS) { $env:AMINOS_SUITE_MODELS } else { "auto" }),
   [switch]$NoTests,
   [switch]$NoSystem
 )
@@ -40,7 +41,7 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 $msys = @($env:MSYS2_ROOT, "C:\msys64", "C:\tools\msys64") | Where-Object { $_ -and (Test-Path "$_\usr\bin\bash.exe") } | Select-Object -First 1
 if (-not $msys -and -not $NoSystem) {
   if (Winget-Install "MSYS2.MSYS2") { $msys = "C:\msys64" }
-  else { Say "MSYS2 not found and winget unavailable: the Kimi K3 engine will be skipped (install MSYS2, then aminos-suite update)" }
+  else { Say "MSYS2 not found and winget unavailable: llama.cpp will be skipped (install MSYS2, then aminos-suite install --only llama)" }
 }
 if ($msys) { $env:MSYS2_ROOT = $msys }
 
@@ -74,6 +75,7 @@ $suiteArgs = @("$src\suite\suite.py", "install", "--suite-ref", $Ref)
 if ($Only) { $suiteArgs += "--only=$Only" }
 if ($Skip) { $suiteArgs += "--skip=$Skip" }
 if ($With) { $suiteArgs += "--with=$With" }
+$suiteArgs += "--models=$Models"
 if ($NoTests) { $suiteArgs += "--no-tests" }
 $env:AMINOS_SUITE_HOME = $SuiteHome
 & $py @suiteArgs
