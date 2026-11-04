@@ -107,7 +107,7 @@ if ($Domain) {
             $myIp = (Invoke-RestMethod -UseBasicParsing "https://api.ipify.org" -TimeoutSec 20).Trim()
             $dnsIps = @(Resolve-DnsName $publicHost -Type A -ErrorAction Stop | Where-Object { $_.IPAddress } | ForEach-Object { $_.IPAddress })
             if ($dnsIps -contains $myIp) { Note "DNS OK: $publicHost -> $myIp" }
-            else { Warn "$publicHost resolves to [$($dnsIps -join ', ')] but this server is $myIp: HTTPS will not be issued until the A record points here." }
+            else { Warn "$publicHost resolves to [$($dnsIps -join ', ')] but this server is ${myIp}: HTTPS will not be issued until the A record points here." }
         } catch { Warn "Could not verify the DNS record of $publicHost ($($_.Exception.Message))." }
     }
 }
