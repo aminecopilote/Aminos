@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<martif type="TBX" xml:lang="en"><martifHeader><fileDesc><sourceDesc><p>fixture</p></sourceDesc></fileDesc></martifHeader>
+<text><body>
+<termEntry id="e1"><descrip type="subjectField">Law</descrip>
+ <langSet xml:lang="en"><tig><term>judgment</term></tig><tig><term>ruling</term></tig></langSet>
+ <langSet xml:lang="fr"><tig><term>jugement</term></tig><tig><term>arrêt</term></tig></langSet>
+ <langSet xml:lang="nl"><tig><term>vonnis</term></tig></langSet>
+ <langSet xml:lang="ar"><ntig><termGrp><term>حكم</term></termGrp></ntig></langSet></termEntry>
+<termEntry id="e2"><langSet xml:lang="en"><tig><term>appeal</term></tig></langSet><langSet xml:lang="de"><tig><term>Berufung</term></tig></langSet></termEntry>
+</body></text></martif>

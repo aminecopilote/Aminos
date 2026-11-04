@@ -1,0 +1,29 @@
+# Render Blueprint: multi-user Aminos (one instance, SQLite on a persistent disk, so do not scale beyond 1 instance).
+# Persistent disks need a paid plan. No local model is possible on Render, so translation goes through a third-party
+# provider: set the key(s) below and read the confidentiality note in deploy/SAAS.md before using real client documents.
+services:
+  - type: web
+    name: aminos
+    runtime: docker
+    region: frankfurt            # EU data residency; change if you need another region
+    plan: starter
+    numInstances: 1
+    dockerfilePath: ./deploy/Dockerfile
+    dockerContext: .
+    healthCheckPath: /_stcore/health
+    autoDeployTrigger: "off"
+    disk:
+      name: aminos-data
+      mountPath: /data
+      sizeGB: 5
+    envVars:
+      - key: AMINOS_DATA_DIR
+        value: /data/saas
+      - key: AMINOS_ADMIN_USER
+        sync: false              # asked once in the Dashboard; creates the first administrator
+      - key: AMINOS_ADMIN_PASSWORD
+        sync: false              # at least 12 characters
+      - key: AMINOS_ALLOW_REMOTE_LLM
+        value: "1"               # required on Render; each account must still be granted it by an administrator
+      - key: ANTHROPIC_API_KEY
+        sync: false

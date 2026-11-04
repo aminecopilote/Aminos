@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aminos — Back-office</title>
+<link rel="stylesheet" href="/erp/static/bootstrap.min.css">
+<link rel="stylesheet" href="/erp/static/app.css">
+</head>
+<body>
+<nav class="navbar navbar-expand bg-dark navbar-dark px-3" id="topbar" hidden>
+  <span class="navbar-brand">Aminos · Back-office</span>
+  <ul class="navbar-nav me-auto" id="tabs"></ul>
+  <span class="navbar-text me-3" id="who"></span>
+  <button class="btn btn-outline-light btn-sm" id="logout">Quitter</button>
+</nav>
+<main class="container-xl py-4" id="view"></main>
+<div class="modal fade" id="modal" tabindex="-1"><div class="modal-dialog modal-lg"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title" id="modal-title"></h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+  <div class="modal-body" id="modal-body"></div>
+</div></div></div>
+<script src="/erp/static/bootstrap.bundle.min.js"></script>
+<script src="/erp/static/app.js"></script>
+</body>
+</html>
