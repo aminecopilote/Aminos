@@ -91,7 +91,7 @@ $freeGb = [math]::Round($sysDrive.Free / 1GB, 1)
 Note "Free space on $($sysDrive.Name): $freeGb GB"
 if ($freeGb -lt 8) { Fail "At least 8 GB of free disk space is required (found $freeGb GB)." }
 if ($freeGb -lt 15) { Warn "Less than 15 GB free: LibreOffice, n8n and the backups need room." }
-if (-not $isAdmin -and -not $NoService) { Fail "Run PowerShell as Administrator (or add -NoService for a per-user test install)." }
+if (-not $isAdmin -and -not $NoService -and -not $CheckOnly) { Fail "Run PowerShell as Administrator (or add -NoService for a per-user test install)." }
 
 $hosts = @("https://github.com", "https://pypi.org", "https://files.pythonhosted.org", "https://www.python.org", "https://raw.githubusercontent.com")
 if ($N8n -or $Agency) { $hosts += "https://nodejs.org" }
