@@ -46,3 +46,17 @@ Avec `-Saas`, la tâche planifiée **Aminos-ERP** démarre aussi le back-office 
 ## Automatisation n8n (option `-N8n`)
 
 `.\install.ps1 -Saas -N8n -AlertUrl https://votre-webhook` (ou avec `bootstrap.ps1`) télécharge Node 24 portable (somme SHA-256 vérifiée), installe n8n 2.46.4 dans `C:\Aminos\n8n`, importe les cinq workflows et démarre la tâche `Aminos-N8n` sur `127.0.0.1:5678` (éditeur : bureau à distance ou tunnel ; seul `/webhook/*` passe par Caddy). Détails : `deploy/N8N.md`. Logs : `C:\Aminos\logs\n8n.log`.
+
+## VPS Windows Server 2022 neuf : un seul script avec toutes les dépendances
+
+`vps-install.ps1` installe ce qui manque (Visual C++, Python 3.12, Git pour Windows qui fournit aussi OpenSSL, LibreOffice pour le PDF des pages traduites ; Node 24 avec `-Agency` ; Tesseract avec `-WithOcr`, non testé), vérifie la **signature numérique** de chaque installateur avant de l'exécuter, active les chemins longs, exclut le dossier d'installation de Defender **pendant l'installation seulement**, puis lance l'installation d'Aminos (multi-utilisateurs, back-office, HTTPS, tâches au démarrage, pare-feu 80/443) et vérifie que tout répond. Journal : `C:\Aminos\install.log`.
+
+```powershell
+# PowerShell en administrateur
+Set-ExecutionPolicy Bypass -Scope Process -Force
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest -UseBasicParsing https://raw.githubusercontent.com/aminecopilote/Aminos/<ref>/deploy/windows/vps-install.ps1 -OutFile vps-install.ps1
+.\vps-install.ps1 -Ref <ref> -Domain votre.domaine -N8n -AlertUrl https://votre-webhook
+```
+
+`-CheckOnly` vérifie la machine, le réseau et le DNS sans rien installer. Le nom de domaine doit déjà pointer sur l'adresse IP publique du VPS. Redémarrez le VPS une fois pour vérifier que le site revient seul.

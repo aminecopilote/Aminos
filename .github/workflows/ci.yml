@@ -312,6 +312,32 @@ jobs:
           if (Test-Path C:\Aminos\saas.env) { throw "secrets file remains" }
           if (-not (Test-Path C:\Aminos\data)) { throw "data was deleted" }
 
+  windows-vps:
+    # deploy/windows/vps-install.ps1 on Windows Server 2022: prerequisites (signature-checked), bootstrap, health checks.
+    runs-on: windows-2022
+    steps:
+      - name: Pre-flight only
+        shell: powershell
+        env:
+          REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          Invoke-WebRequest -UseBasicParsing "https://raw.githubusercontent.com/${{ github.repository }}/$env:REF/deploy/windows/vps-install.ps1" -OutFile "$env:TEMP\vps-install.ps1"
+          & "$env:TEMP\vps-install.ps1" -Repo "${{ github.repository }}" -Ref $env:REF -CheckOnly -NoPdf
+      - name: Full install (per-user, no LibreOffice)
+        shell: powershell
+        env:
+          REF: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          & "$env:TEMP\vps-install.ps1" -Repo "${{ github.repository }}" -Ref $env:REF -Dir C:\Aminos -NoService -NoPdf
+          if ($LASTEXITCODE -ne 0) { Get-Content C:\Aminos\logs\*.log -ErrorAction SilentlyContinue | Select-Object -Last 60; throw "vps-install failed" }
+      - name: Install log is complete
+        shell: powershell
+        run: |
+          $log = Get-Content C:\Aminos\install.log -Raw
+          foreach ($needle in "Checking the machine", "Visual C++ runtime", "Python 3.12", "Git for Windows", "Checking that everything answers") {
+            if ($log -notmatch [regex]::Escape($needle)) { throw "missing step in log: $needle" }
+          }
+
   windows-online:
     # The one-line online install: bootstrap.ps1 is downloaded from GitHub like a user would, installs from PyPI and GitHub.
     runs-on: windows-latest
